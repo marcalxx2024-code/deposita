@@ -161,3 +161,50 @@ def test_list_stock_movements_returns_most_recent_first():
     assert movements[0]["movement_type"] == "exit"
     assert movements[1]["id"] == entry_response.json()["id"]
     assert movements[1]["movement_type"] == "entry"
+
+
+def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
+    with TestClient(app) as client:
+        above_minimum = client.post(
+            "/products",
+            json={
+                "name": "Estoque acima",
+                "category": "Teste",
+                "quantity": 6,
+                "minimum_quantity": 5,
+                "price": 10.0,
+            },
+        )
+        equal_to_minimum = client.post(
+            "/products",
+            json={
+                "name": "Estoque mínimo",
+                "category": "Teste",
+                "quantity": 3,
+                "minimum_quantity": 3,
+                "price": 10.0,
+            },
+        )
+        below_minimum = client.post(
+            "/products",
+            json={
+                "name": "Estoque baixo",
+                "category": "Teste",
+                "quantity": 1,
+                "minimum_quantity": 2,
+                "price": 10.0,
+            },
+        )
+        response = client.get("/products/low-stock")
+
+    assert above_minimum.status_code == 200
+    assert equal_to_minimum.status_code == 200
+    assert below_minimum.status_code == 200
+    assert response.status_code == 200
+
+    products = response.json()
+    assert [product["id"] for product in products] == [
+        below_minimum.json()["id"],
+        equal_to_minimum.json()["id"],
+    ]
+    assert [product["quantity"] for product in products] == [1, 3]

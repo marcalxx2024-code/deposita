@@ -30,6 +30,16 @@ def list_products(db: Session = Depends(get_db)):
     return db.query(models.Product).order_by(models.Product.id.asc()).all()
 
 
+@app.get("/products/low-stock", response_model=list[schemas.ProductResponse])
+def list_low_stock_products(db: Session = Depends(get_db)):
+    return (
+        db.query(models.Product)
+        .filter(models.Product.quantity <= models.Product.minimum_quantity)
+        .order_by(models.Product.quantity.asc(), models.Product.id.asc())
+        .all()
+    )
+
+
 @app.get("/products/{product_id}", response_model=schemas.ProductResponse)
 def get_product(product_id: int, db: Session = Depends(get_db)):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
