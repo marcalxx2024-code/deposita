@@ -55,3 +55,14 @@ def update_product(
     db.commit()
     db.refresh(product)
     return product
+
+
+@app.delete("/products/{product_id}", status_code=200)
+def delete_product(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+
+    db.delete(product)
+    db.commit()
+    return {"message": "Produto excluído com sucesso"}
