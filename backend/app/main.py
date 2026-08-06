@@ -35,3 +35,23 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
     if product is None:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
     return product
+
+
+@app.put("/products/{product_id}", response_model=schemas.ProductResponse)
+def update_product(
+    product_id: int,
+    product_data: schemas.ProductUpdate,
+    db: Session = Depends(get_db),
+):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+
+    product.name = product_data.name
+    product.category = product_data.category
+    product.minimum_quantity = product_data.minimum_quantity
+    product.price = product_data.price
+
+    db.commit()
+    db.refresh(product)
+    return product
