@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -38,6 +39,31 @@ def list_low_stock_products(db: Session = Depends(get_db)):
         .order_by(models.Product.quantity.asc(), models.Product.id.asc())
         .all()
     )
+
+
+@app.get("/dashboard/summary", response_model=schemas.DashboardSummaryResponse)
+def get_dashboard_summary(db: Session = Depends(get_db)):
+    total_products = db.query(models.Product).count()
+    total_units = db.query(func.coalesce(func.sum(models.Product.quantity), 0)).scalar()
+    low_stock_products = (
+        db.query(models.Product)
+        .filter(models.Product.quantity <= models.Product.minimum_quantity)
+        .count()
+    )
+    out_of_stock_products = (
+        db.query(models.Product).filter(models.Product.quantity == 0).count()
+    )
+    estimated_stock_value = db.query(
+        func.coalesce(func.sum(models.Product.quantity * models.Product.price), 0)
+    ).scalar()
+
+    return {
+        "total_products": total_products,
+        "total_units": total_units,
+        "low_stock_products": low_stock_products,
+        "out_of_stock_products": out_of_stock_products,
+        "estimated_stock_value": round(float(estimated_stock_value), 2),
+    }
 
 
 @app.get("/products/{product_id}", response_model=schemas.ProductResponse)

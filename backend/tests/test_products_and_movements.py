@@ -208,3 +208,59 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
         equal_to_minimum.json()["id"],
     ]
     assert [product["quantity"] for product in products] == [1, 3]
+
+
+def test_dashboard_summary_returns_zeros_for_empty_database():
+    with TestClient(app) as client:
+        response = client.get("/dashboard/summary")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total_products": 0,
+        "total_units": 0,
+        "low_stock_products": 0,
+        "out_of_stock_products": 0,
+        "estimated_stock_value": 0.0,
+    }
+
+
+def test_dashboard_summary_calculates_inventory_indicators():
+    products = [
+        {
+            "name": "Estoque normal",
+            "category": "Teste",
+            "quantity": 10,
+            "minimum_quantity": 3,
+            "price": 2.5,
+        },
+        {
+            "name": "Estoque baixo",
+            "category": "Teste",
+            "quantity": 2,
+            "minimum_quantity": 2,
+            "price": 3.25,
+        },
+        {
+            "name": "Estoque zerado",
+            "category": "Teste",
+            "quantity": 0,
+            "minimum_quantity": 1,
+            "price": 7.0,
+        },
+    ]
+
+    with TestClient(app) as client:
+        for product in products:
+            create_response = client.post("/products", json=product)
+            assert create_response.status_code == 200
+
+        response = client.get("/dashboard/summary")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total_products": 3,
+        "total_units": 12,
+        "low_stock_products": 2,
+        "out_of_stock_products": 1,
+        "estimated_stock_value": 31.5,
+    }

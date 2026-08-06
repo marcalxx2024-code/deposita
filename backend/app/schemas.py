@@ -50,3 +50,13 @@ class StockMovementResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DashboardSummaryResponse(BaseModel):
+    total_products: int
+    total_units: int
+    low_stock_products: int
+    out_of_stock_products: int
+    estimated_stock_value: float
+
+    model_config = ConfigDict(extra="forbid")
