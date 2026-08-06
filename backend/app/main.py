@@ -22,3 +22,8 @@ def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(db_product)
     return db_product
+
+
+@app.get("/products", response_model=list[schemas.ProductResponse])
+def list_products(db: Session = Depends(get_db)):
+    return db.query(models.Product).order_by(models.Product.id.asc()).all()
