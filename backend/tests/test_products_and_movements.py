@@ -135,3 +135,29 @@ def test_incorrect_movement_type_for_route_is_rejected():
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Tipo de movimentação inválido para esta rota"
+
+
+def test_list_stock_movements_returns_most_recent_first():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+
+        entry_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 5},
+        )
+        exit_response = client.post(
+            f"/products/{product['id']}/movements/exit",
+            json={"movement_type": "exit", "quantity": 4},
+        )
+        movements_response = client.get("/movements")
+
+    assert entry_response.status_code == 201
+    assert exit_response.status_code == 201
+    assert movements_response.status_code == 200
+
+    movements = movements_response.json()
+    assert len(movements) == 2
+    assert movements[0]["id"] == exit_response.json()["id"]
+    assert movements[0]["movement_type"] == "exit"
+    assert movements[1]["id"] == entry_response.json()["id"]
+    assert movements[1]["movement_type"] == "entry"

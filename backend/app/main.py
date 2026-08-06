@@ -148,3 +148,12 @@ def create_stock_exit(
 
     db.refresh(movement)
     return movement
+
+
+@app.get("/movements", response_model=list[schemas.StockMovementResponse])
+def list_stock_movements(db: Session = Depends(get_db)):
+    return (
+        db.query(models.StockMovement)
+        .order_by(models.StockMovement.created_at.desc(), models.StockMovement.id.desc())
+        .all()
+    )
