@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
 from app import models
@@ -27,3 +27,11 @@ def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)
 @app.get("/products", response_model=list[schemas.ProductResponse])
 def list_products(db: Session = Depends(get_db)):
     return db.query(models.Product).order_by(models.Product.id.asc()).all()
+
+
+@app.get("/products/{product_id}", response_model=schemas.ProductResponse)
+def get_product(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+    return product
