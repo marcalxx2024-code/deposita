@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -26,5 +29,24 @@ class ProductUpdate(BaseModel):
 
 class ProductResponse(ProductBase):
     id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StockMovementCreate(BaseModel):
+    movement_type: Literal["entry", "exit"]
+    quantity: int = Field(gt=0)
+    note: str | None = Field(default=None, max_length=255)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StockMovementResponse(BaseModel):
+    id: int
+    product_id: int
+    movement_type: str
+    quantity: int
+    note: str | None
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

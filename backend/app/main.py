@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import models
@@ -66,3 +67,42 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
     db.delete(product)
     db.commit()
     return {"message": "Produto excluído com sucesso"}
+
+
+@app.post(
+    "/products/{product_id}/movements/entry",
+    response_model=schemas.StockMovementResponse,
+    status_code=201,
+)
+def create_stock_entry(
+    product_id: int,
+    movement_data: schemas.StockMovementCreate,
+    db: Session = Depends(get_db),
+):
+    if movement_data.movement_type != "entry":
+        raise HTTPException(
+            status_code=400,
+            detail="Tipo de movimentação inválido para esta rota",
+        )
+
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+
+    product.quantity += movement_data.quantity
+    movement = models.StockMovement(
+        product_id=product_id,
+        movement_type="entry",
+        quantity=movement_data.quantity,
+        note=movement_data.note,
+    )
+    db.add(movement)
+
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
+
+    db.refresh(movement)
+    return movement
