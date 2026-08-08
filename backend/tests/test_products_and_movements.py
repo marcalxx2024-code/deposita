@@ -217,10 +217,9 @@ def test_dashboard_summary_returns_zeros_for_empty_database():
     assert response.status_code == 200
     assert response.json() == {
         "total_products": 0,
-        "total_units": 0,
+        "total_stock_quantity": 0,
         "low_stock_products": 0,
-        "out_of_stock_products": 0,
-        "estimated_stock_value": 0.0,
+        "recent_movements": [],
     }
 
 
@@ -259,8 +258,30 @@ def test_dashboard_summary_calculates_inventory_indicators():
     assert response.status_code == 200
     assert response.json() == {
         "total_products": 3,
-        "total_units": 12,
+        "total_stock_quantity": 12,
         "low_stock_products": 2,
-        "out_of_stock_products": 1,
-        "estimated_stock_value": 31.5,
+        "recent_movements": [],
     }
+
+
+def test_dashboard_summary_returns_five_most_recent_movements():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        movement_responses = []
+
+        for quantity in range(1, 7):
+            response = client.post(
+                f"/products/{product['id']}/movements/entry",
+                json={"movement_type": "entry", "quantity": quantity},
+            )
+            assert response.status_code == 201
+            movement_responses.append(response.json())
+
+        summary_response = client.get("/dashboard/summary")
+
+    assert summary_response.status_code == 200
+    recent_movements = summary_response.json()["recent_movements"]
+    assert len(recent_movements) == 5
+    assert [movement["id"] for movement in recent_movements] == [
+        movement["id"] for movement in reversed(movement_responses[-5:])
+    ]

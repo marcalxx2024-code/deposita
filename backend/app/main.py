@@ -12,6 +12,12 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 
+def low_stock_products_query(db: Session):
+    return db.query(models.Product).filter(
+        models.Product.quantity <= models.Product.minimum_quantity
+    )
+
+
 @app.get("/health")
 def health_check():
     return {"status": "online"}
@@ -34,8 +40,7 @@ def list_products(db: Session = Depends(get_db)):
 @app.get("/products/low-stock", response_model=list[schemas.ProductResponse])
 def list_low_stock_products(db: Session = Depends(get_db)):
     return (
-        db.query(models.Product)
-        .filter(models.Product.quantity <= models.Product.minimum_quantity)
+        low_stock_products_query(db)
         .order_by(models.Product.quantity.asc(), models.Product.id.asc())
         .all()
     )
@@ -44,25 +49,22 @@ def list_low_stock_products(db: Session = Depends(get_db)):
 @app.get("/dashboard/summary", response_model=schemas.DashboardSummaryResponse)
 def get_dashboard_summary(db: Session = Depends(get_db)):
     total_products = db.query(models.Product).count()
-    total_units = db.query(func.coalesce(func.sum(models.Product.quantity), 0)).scalar()
-    low_stock_products = (
-        db.query(models.Product)
-        .filter(models.Product.quantity <= models.Product.minimum_quantity)
-        .count()
-    )
-    out_of_stock_products = (
-        db.query(models.Product).filter(models.Product.quantity == 0).count()
-    )
-    estimated_stock_value = db.query(
-        func.coalesce(func.sum(models.Product.quantity * models.Product.price), 0)
+    total_stock_quantity = db.query(
+        func.coalesce(func.sum(models.Product.quantity), 0)
     ).scalar()
+    low_stock_products = low_stock_products_query(db).count()
+    recent_movements = (
+        db.query(models.StockMovement)
+        .order_by(models.StockMovement.created_at.desc(), models.StockMovement.id.desc())
+        .limit(5)
+        .all()
+    )
 
     return {
         "total_products": total_products,
-        "total_units": total_units,
+        "total_stock_quantity": total_stock_quantity,
         "low_stock_products": low_stock_products,
-        "out_of_stock_products": out_of_stock_products,
-        "estimated_stock_value": round(float(estimated_stock_value), 2),
+        "recent_movements": recent_movements,
     }
 
 

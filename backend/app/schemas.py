@@ -54,9 +54,8 @@ class StockMovementResponse(BaseModel):
 
 class DashboardSummaryResponse(BaseModel):
     total_products: int
-    total_units: int
+    total_stock_quantity: int
     low_stock_products: int
-    out_of_stock_products: int
-    estimated_stock_value: float
+    recent_movements: list[StockMovementResponse]
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
