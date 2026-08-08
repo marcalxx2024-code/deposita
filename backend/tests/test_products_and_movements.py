@@ -4,6 +4,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
+from app.models import User
+from app.security import verify_password
 
 
 TEST_DATABASE_URL = "sqlite:///./test_deposita.db"
@@ -62,6 +64,74 @@ def test_create_product_returns_id():
         product = create_product(client, quantity=10)
 
     assert isinstance(product["id"], int)
+
+
+def test_create_user_hashes_password_and_hides_sensitive_fields():
+    plain_password = "uma-senha-segura"
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": plain_password},
+        )
+
+    assert response.status_code == 201
+    user_response = response.json()
+    assert user_response["username"] == "guilherme"
+    assert "id" in user_response
+    assert "created_at" in user_response
+    assert "password" not in user_response
+    assert "password_hash" not in user_response
+
+    db = TestingSessionLocal()
+    try:
+        stored_user = db.query(User).filter(User.id == user_response["id"]).one()
+    finally:
+        db.close()
+
+    assert stored_user.password_hash != plain_password
+    assert verify_password(plain_password, stored_user.password_hash)
+    assert not verify_password("senha-incorreta", stored_user.password_hash)
+
+
+def test_create_user_rejects_duplicate_username():
+    with TestClient(app) as client:
+        first_response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": "uma-senha-segura"},
+        )
+        duplicate_response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": "outra-senha-segura"},
+        )
+
+    assert first_response.status_code == 201
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json()["error"]["code"] == "USERNAME_ALREADY_EXISTS"
+
+
+def test_create_user_validates_password_length_and_username():
+    with TestClient(app) as client:
+        short_password_response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": "curta"},
+        )
+        empty_username_response = client.post(
+            "/users",
+            json={"username": "", "password": "uma-senha-segura"},
+        )
+        whitespace_username_response = client.post(
+            "/users",
+            json={"username": "   ", "password": "uma-senha-segura"},
+        )
+
+    for response in (
+        short_password_response,
+        empty_username_response,
+        whitespace_username_response,
+    ):
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_product_not_found_errors_are_standardized():

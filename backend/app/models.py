@@ -34,3 +34,12 @@ class StockMovement(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     product = relationship("Product", back_populates="movements")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False, unique=True, index=True)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

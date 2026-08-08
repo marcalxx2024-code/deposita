@@ -4,13 +4,14 @@ from fastapi import Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import models
 from app import schemas
 from app.database import Base, engine, get_db, normalize_search_text
-from app.errors import APIError, product_not_found_error
+from app.errors import APIError, product_not_found_error, username_already_exists_error
+from app.security import hash_password
 
 Base.metadata.create_all(bind=engine)
 
@@ -83,6 +84,24 @@ def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(db_product)
     return db_product
+
+
+@app.post("/users", response_model=schemas.UserResponse, status_code=201)
+def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    db_user = models.User(
+        username=user.username,
+        password_hash=hash_password(user.password),
+    )
+    db.add(db_user)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise username_already_exists_error()
+
+    db.refresh(db_user)
+    return db_user
 
 
 @app.get("/products", response_model=schemas.PaginatedProductResponse)

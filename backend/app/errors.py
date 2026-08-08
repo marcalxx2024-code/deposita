@@ -11,3 +11,11 @@ def product_not_found_error() -> APIError:
         code="PRODUCT_NOT_FOUND",
         message="Produto não encontrado",
     )
+
+
+def username_already_exists_error() -> APIError:
+    return APIError(
+        status_code=409,
+        code="USERNAME_ALREADY_EXISTS",
+        message="Nome de usuário já está em uso",
+    )
