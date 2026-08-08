@@ -1,6 +1,11 @@
+import os
+
 from sqlalchemy import create_engine
 
 from app import database
+
+
+os.environ["DEPOSITA_SECRET_KEY"] = "test-secret-key-for-deposita"
 
 
 TEST_DATABASE_URL = "sqlite:///./test_deposita.db"

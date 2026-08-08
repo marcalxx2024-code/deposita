@@ -1,8 +1,9 @@
 import logging
 
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from jwt import InvalidTokenError
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -10,25 +11,42 @@ from sqlalchemy.orm import Session
 from app import models
 from app import schemas
 from app.database import Base, engine, get_db, normalize_search_text
-from app.errors import APIError, product_not_found_error, username_already_exists_error
-from app.security import hash_password
+from app.errors import (
+    APIError,
+    invalid_authentication_error,
+    invalid_credentials_error,
+    product_not_found_error,
+    username_already_exists_error,
+)
+from app.security import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    validate_auth_settings,
+    verify_password,
+)
 
+validate_auth_settings()
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
+DUMMY_PASSWORD_HASH = hash_password("not-a-valid-user-password")
 
 
-def error_response(status_code: int, code: str, message: str, **extra):
+def error_response(
+    status_code: int, code: str, message: str, headers: dict[str, str] | None = None, **extra
+):
     return JSONResponse(
         status_code=status_code,
         content={"error": {"code": code, "message": message, **extra}},
+        headers=headers,
     )
 
 
 @app.exception_handler(APIError)
 async def api_error_handler(_request: Request, exc: APIError):
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(exc.status_code, exc.code, exc.message, exc.headers)
 
 
 @app.exception_handler(RequestValidationError)
@@ -102,6 +120,51 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
     db.refresh(db_user)
     return db_user
+
+
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> models.User:
+    if authorization is None:
+        raise invalid_authentication_error()
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise invalid_authentication_error()
+
+    try:
+        user_id = int(decode_access_token(token))
+    except (InvalidTokenError, ValueError):
+        raise invalid_authentication_error()
+
+    user = db.get(models.User, user_id)
+    if user is None:
+        raise invalid_authentication_error()
+    return user
+
+
+@app.post("/auth/login", response_model=schemas.TokenResponse)
+def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
+    user = (
+        db.query(models.User)
+        .filter(models.User.username == credentials.username)
+        .first()
+    )
+    password_to_verify = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+
+    if not verify_password(credentials.password, password_to_verify) or user is None:
+        raise invalid_credentials_error()
+
+    return {
+        "access_token": create_access_token(str(user.id)),
+        "token_type": "bearer",
+    }
+
+
+@app.get("/auth/me", response_model=schemas.UserResponse)
+def get_authenticated_user(current_user: models.User = Depends(get_current_user)):
+    return current_user
 
 
 @app.get("/products", response_model=schemas.PaginatedProductResponse)

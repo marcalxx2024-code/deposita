@@ -4,6 +4,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def normalize_username(value: str) -> str:
+    normalized_username = value.strip()
+    if not normalized_username:
+        raise ValueError("Username não pode estar vazio")
+    return normalized_username
+
+
 class ProductBase(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     category: str = Field(min_length=2, max_length=50)
@@ -40,10 +47,7 @@ class UserCreate(BaseModel):
     @field_validator("username")
     @classmethod
     def normalize_username(cls, value: str) -> str:
-        normalized_username = value.strip()
-        if not normalized_username:
-            raise ValueError("Username não pode estar vazio")
-        return normalized_username
+        return normalize_username(value)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -54,6 +58,23 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        return normalize_username(value)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
 
 
 class PaginatedProductResponse(BaseModel):

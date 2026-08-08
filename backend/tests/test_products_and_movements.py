@@ -1,3 +1,7 @@
+import os
+from datetime import datetime, timedelta, timezone
+
+import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -5,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
 from app.models import User
-from app.security import verify_password
+from app.security import create_access_token, verify_password
 
 
 TEST_DATABASE_URL = "sqlite:///./test_deposita.db"
@@ -132,6 +136,113 @@ def test_create_user_validates_password_length_and_username():
     ):
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_login_returns_bearer_access_token_for_valid_credentials():
+    with TestClient(app) as client:
+        create_user_response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": "uma-senha-segura"},
+        )
+        response = client.post(
+            "/auth/login",
+            json={"username": "guilherme", "password": "uma-senha-segura"},
+        )
+
+    assert create_user_response.status_code == 201
+    assert response.status_code == 200
+    assert response.json()["access_token"]
+    assert response.json()["token_type"] == "bearer"
+
+
+def test_login_returns_same_error_for_invalid_credentials():
+    with TestClient(app) as client:
+        create_user_response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": "uma-senha-segura"},
+        )
+        wrong_password_response = client.post(
+            "/auth/login",
+            json={"username": "guilherme", "password": "senha-incorreta"},
+        )
+        unknown_user_response = client.post(
+            "/auth/login",
+            json={"username": "inexistente", "password": "senha-incorreta"},
+        )
+
+    assert create_user_response.status_code == 201
+    for response in (wrong_password_response, unknown_user_response):
+        assert response.status_code == 401
+        assert response.json()["error"] == {
+            "code": "INVALID_CREDENTIALS",
+            "message": "Credenciais inválidas",
+        }
+
+
+def test_auth_me_requires_a_valid_token_and_hides_password_hash():
+    with TestClient(app) as client:
+        user_response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": "uma-senha-segura"},
+        )
+        login_response = client.post(
+            "/auth/login",
+            json={"username": "guilherme", "password": "uma-senha-segura"},
+        )
+        missing_token_response = client.get("/auth/me")
+        authenticated_response = client.get(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {login_response.json()['access_token']}"},
+        )
+
+    assert user_response.status_code == 201
+    assert missing_token_response.status_code == 401
+    assert missing_token_response.json()["error"]["code"] == "INVALID_AUTHENTICATION"
+    assert missing_token_response.headers["www-authenticate"] == "Bearer"
+    assert authenticated_response.status_code == 200
+    assert authenticated_response.json()["id"] == user_response.json()["id"]
+    assert authenticated_response.json()["username"] == "guilherme"
+    assert "password_hash" not in authenticated_response.json()
+
+
+def test_auth_me_rejects_tampered_expired_and_unexpected_algorithm_tokens():
+    with TestClient(app) as client:
+        user_response = client.post(
+            "/users",
+            json={"username": "guilherme", "password": "uma-senha-segura"},
+        )
+        user_id = user_response.json()["id"]
+        expired_token = create_access_token(
+            str(user_id), expires_delta=timedelta(seconds=-1)
+        )
+        unexpected_algorithm_token = jwt.encode(
+            {
+                "sub": str(user_id),
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=1),
+            },
+            os.environ["DEPOSITA_SECRET_KEY"],
+            algorithm="HS384",
+        )
+
+        tampered_response = client.get(
+            "/auth/me", headers={"Authorization": "Bearer tampered-token"}
+        )
+        expired_response = client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {expired_token}"}
+        )
+        unexpected_algorithm_response = client.get(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {unexpected_algorithm_token}"},
+        )
+
+    assert user_response.status_code == 201
+    for response in (
+        tampered_response,
+        expired_response,
+        unexpected_algorithm_response,
+    ):
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "INVALID_AUTHENTICATION"
 
 
 def test_product_not_found_errors_are_standardized():
