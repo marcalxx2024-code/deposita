@@ -37,14 +37,19 @@ def teardown_function():
     Base.metadata.drop_all(bind=test_engine)
 
 
-def create_product(client: TestClient, quantity: int) -> dict:
+def create_product(
+    client: TestClient,
+    quantity: int,
+    name: str = "Produto de teste",
+    minimum_quantity: int = 2,
+) -> dict:
     response = client.post(
         "/products",
         json={
-            "name": "Produto de teste",
+            "name": name,
             "category": "Teste",
             "quantity": quantity,
-            "minimum_quantity": 2,
+            "minimum_quantity": minimum_quantity,
             "price": 10.5,
         },
     )
@@ -57,6 +62,99 @@ def test_create_product_returns_id():
         product = create_product(client, quantity=10)
 
     assert isinstance(product["id"], int)
+
+
+def test_list_products_uses_default_pagination():
+    with TestClient(app) as client:
+        for index in range(21):
+            create_product(client, quantity=index, name=f"Produto {index}")
+
+        response = client.get("/products")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["page"] == 1
+    assert data["page_size"] == 20
+    assert data["total"] == 21
+    assert data["pages"] == 2
+    assert [product["id"] for product in data["items"]] == list(range(1, 21))
+
+
+def test_list_products_supports_custom_page_and_page_size():
+    with TestClient(app) as client:
+        for index in range(5):
+            create_product(client, quantity=index, name=f"Produto {index}")
+
+        response = client.get("/products", params={"page": 2, "page_size": 2})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["page"] == 2
+    assert data["page_size"] == 2
+    assert data["total"] == 5
+    assert data["pages"] == 3
+    assert [product["id"] for product in data["items"]] == [3, 4]
+
+
+def test_list_products_searches_name_case_insensitively():
+    with TestClient(app) as client:
+        matching_product = create_product(
+            client, quantity=5, name="Teclado Mecanico"
+        )
+        create_product(client, quantity=5, name="Mouse")
+
+        response = client.get("/products", params={"search": "MECANICO"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert [product["id"] for product in data["items"]] == [matching_product["id"]]
+
+
+def test_list_products_filters_low_stock_and_combines_filters_with_pagination():
+    with TestClient(app) as client:
+        low_stock_first = create_product(
+            client, quantity=1, minimum_quantity=2, name="Baixo primeiro"
+        )
+        low_stock_second = create_product(
+            client, quantity=2, minimum_quantity=2, name="Baixo segundo"
+        )
+        normal_stock = create_product(
+            client, quantity=3, minimum_quantity=2, name="Estoque normal"
+        )
+
+        low_stock_response = client.get("/products", params={"low_stock": True})
+        normal_stock_response = client.get("/products", params={"low_stock": False})
+        combined_response = client.get(
+            "/products",
+            params={"search": "baixo", "low_stock": True, "page": 2, "page_size": 1},
+        )
+
+    assert low_stock_response.status_code == 200
+    assert [product["id"] for product in low_stock_response.json()["items"]] == [
+        low_stock_first["id"],
+        low_stock_second["id"],
+    ]
+    assert normal_stock_response.status_code == 200
+    assert [product["id"] for product in normal_stock_response.json()["items"]] == [
+        normal_stock["id"]
+    ]
+    assert combined_response.status_code == 200
+    combined_data = combined_response.json()
+    assert combined_data["total"] == 2
+    assert combined_data["pages"] == 2
+    assert [product["id"] for product in combined_data["items"]] == [
+        low_stock_second["id"]
+    ]
+
+
+def test_list_products_rejects_invalid_pagination_values():
+    with TestClient(app) as client:
+        oversized_response = client.get("/products", params={"page_size": 101})
+        invalid_page_response = client.get("/products", params={"page": 0})
+
+    assert oversized_response.status_code == 422
+    assert invalid_page_response.status_code == 422
 
 
 def test_create_stock_entry_updates_product_quantity():

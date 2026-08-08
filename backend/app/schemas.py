@@ -33,6 +33,16 @@ class ProductResponse(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PaginatedProductResponse(BaseModel):
+    items: list[ProductResponse]
+    page: int
+    page_size: int
+    total: int
+    pages: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class StockMovementCreate(BaseModel):
     movement_type: Literal["entry", "exit"]
     quantity: int = Field(gt=0)

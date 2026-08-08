@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -12,10 +12,15 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 
+def filter_by_low_stock(query, low_stock: bool):
+    if low_stock:
+        return query.filter(models.Product.quantity <= models.Product.minimum_quantity)
+
+    return query.filter(models.Product.quantity > models.Product.minimum_quantity)
+
+
 def low_stock_products_query(db: Session):
-    return db.query(models.Product).filter(
-        models.Product.quantity <= models.Product.minimum_quantity
-    )
+    return filter_by_low_stock(db.query(models.Product), low_stock=True)
 
 
 @app.get("/health")
@@ -32,9 +37,37 @@ def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)
     return db_product
 
 
-@app.get("/products", response_model=list[schemas.ProductResponse])
-def list_products(db: Session = Depends(get_db)):
-    return db.query(models.Product).order_by(models.Product.id.asc()).all()
+@app.get("/products", response_model=schemas.PaginatedProductResponse)
+def list_products(
+    search: str | None = None,
+    low_stock: bool | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.Product)
+
+    if search is not None:
+        query = query.filter(models.Product.name.ilike(f"%{search}%"))
+
+    if low_stock is not None:
+        query = filter_by_low_stock(query, low_stock)
+
+    total = query.count()
+    products = (
+        query.order_by(models.Product.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return {
+        "items": products,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "pages": (total + page_size - 1) // page_size,
+    }
 
 
 @app.get("/products/low-stock", response_model=list[schemas.ProductResponse])
