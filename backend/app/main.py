@@ -95,15 +95,6 @@ def health_check():
     return {"status": "online"}
 
 
-@app.post("/products", response_model=schemas.ProductResponse)
-def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)):
-    db_product = models.Product(**product.model_dump())
-    db.add(db_product)
-    db.commit()
-    db.refresh(db_product)
-    return db_product
-
-
 @app.post("/users", response_model=schemas.UserResponse, status_code=201)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = models.User(
@@ -165,6 +156,19 @@ def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
 @app.get("/auth/me", response_model=schemas.UserResponse)
 def get_authenticated_user(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+@app.post("/products", response_model=schemas.ProductResponse)
+def create_product(
+    product: schemas.ProductCreate,
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
+    db_product = models.Product(**product.model_dump())
+    db.add(db_product)
+    db.commit()
+    db.refresh(db_product)
+    return db_product
 
 
 @app.get("/products", response_model=schemas.PaginatedProductResponse)
@@ -249,6 +253,7 @@ def update_product(
     product_id: int,
     product_data: schemas.ProductUpdate,
     db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
@@ -265,7 +270,11 @@ def update_product(
 
 
 @app.delete("/products/{product_id}", status_code=200)
-def delete_product(product_id: int, db: Session = Depends(get_db)):
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
         raise product_not_found_error()
@@ -284,6 +293,7 @@ def create_stock_entry(
     product_id: int,
     movement_data: schemas.StockMovementCreate,
     db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
 ):
     if movement_data.movement_type != "entry":
         raise APIError(
@@ -324,6 +334,7 @@ def create_stock_exit(
     product_id: int,
     movement_data: schemas.StockMovementCreate,
     db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
 ):
     if movement_data.movement_type != "exit":
         raise APIError(

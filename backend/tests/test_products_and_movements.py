@@ -43,6 +43,27 @@ def teardown_function():
     Base.metadata.drop_all(bind=test_engine)
 
 
+def get_auth_headers(client: TestClient) -> dict[str, str]:
+    headers = getattr(client, "_deposita_auth_headers", None)
+    if headers is not None:
+        return headers
+
+    create_user_response = client.post(
+        "/users",
+        json={"username": "test-user", "password": "uma-senha-segura"},
+    )
+    assert create_user_response.status_code == 201
+    login_response = client.post(
+        "/auth/login",
+        json={"username": "test-user", "password": "uma-senha-segura"},
+    )
+    assert login_response.status_code == 200
+
+    headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+    client._deposita_auth_headers = headers
+    return headers
+
+
 def create_product(
     client: TestClient,
     quantity: int,
@@ -58,6 +79,7 @@ def create_product(
             "minimum_quantity": minimum_quantity,
             "price": 10.5,
         },
+        headers=get_auth_headers(client),
     )
     assert response.status_code == 200
     return response.json()
@@ -68,6 +90,122 @@ def test_create_product_returns_id():
         product = create_product(client, quantity=10)
 
     assert isinstance(product["id"], int)
+
+
+def test_write_endpoints_require_authentication():
+    product_data = {
+        "name": "Produto protegido",
+        "category": "Teste",
+        "quantity": 10,
+        "minimum_quantity": 2,
+        "price": 10.5,
+    }
+    update_data = {
+        "name": "Produto protegido",
+        "category": "Teste",
+        "minimum_quantity": 2,
+        "price": 10.5,
+    }
+
+    with TestClient(app) as client:
+        responses = (
+            client.post("/products", json=product_data),
+            client.put("/products/999999", json=update_data),
+            client.delete("/products/999999"),
+            client.post(
+                "/products/999999/movements/entry",
+                json={"movement_type": "entry", "quantity": 1},
+            ),
+            client.post(
+                "/products/999999/movements/exit",
+                json={"movement_type": "exit", "quantity": 1},
+            ),
+        )
+
+    for response in responses:
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "INVALID_AUTHENTICATION"
+        assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_write_endpoints_work_with_valid_token():
+    product_data = {
+        "name": "Produto protegido",
+        "category": "Teste",
+        "quantity": 10,
+        "minimum_quantity": 2,
+        "price": 10.5,
+    }
+    update_data = {
+        "name": "Produto atualizado",
+        "category": "Teste",
+        "minimum_quantity": 3,
+        "price": 12.0,
+    }
+
+    with TestClient(app) as client:
+        headers = get_auth_headers(client)
+        create_response = client.post("/products", json=product_data, headers=headers)
+        product_id = create_response.json()["id"]
+        update_response = client.put(
+            f"/products/{product_id}", json=update_data, headers=headers
+        )
+        entry_response = client.post(
+            f"/products/{product_id}/movements/entry",
+            json={"movement_type": "entry", "quantity": 2},
+            headers=headers,
+        )
+        exit_response = client.post(
+            f"/products/{product_id}/movements/exit",
+            json={"movement_type": "exit", "quantity": 1},
+            headers=headers,
+        )
+        delete_response = client.delete(f"/products/{product_id}", headers=headers)
+
+    assert create_response.status_code == 200
+    assert update_response.status_code == 200
+    assert entry_response.status_code == 201
+    assert exit_response.status_code == 201
+    assert delete_response.status_code == 200
+
+
+def test_write_endpoints_reject_tampered_tokens():
+    with TestClient(app) as client:
+        response = client.post(
+            "/products",
+            json={
+                "name": "Produto protegido",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+            },
+            headers={"Authorization": "Bearer token-adulterado"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_AUTHENTICATION"
+
+
+def test_read_endpoints_remain_public():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        health_response = client.get("/health")
+        list_response = client.get("/products")
+        product_response = client.get(f"/products/{product['id']}")
+        low_stock_response = client.get("/products/low-stock")
+        movements_response = client.get("/movements")
+        dashboard_response = client.get("/dashboard/summary")
+
+    for response in (
+        health_response,
+        list_response,
+        product_response,
+        low_stock_response,
+        movements_response,
+        dashboard_response,
+    ):
+        assert response.status_code == 200
 
 
 def test_create_user_hashes_password_and_hides_sensitive_fields():
@@ -254,9 +392,10 @@ def test_product_not_found_errors_are_standardized():
     }
 
     with TestClient(app) as client:
+        headers = get_auth_headers(client)
         get_response = client.get("/products/999")
-        update_response = client.put("/products/999", json=product_data)
-        delete_response = client.delete("/products/999")
+        update_response = client.put("/products/999", json=product_data, headers=headers)
+        delete_response = client.delete("/products/999", headers=headers)
 
     for response in (get_response, update_response, delete_response):
         assert response.status_code == 404
@@ -266,6 +405,7 @@ def test_product_not_found_errors_are_standardized():
 
 def test_invalid_payload_returns_safe_validation_details():
     with TestClient(app) as client:
+        headers = get_auth_headers(client)
         response = client.post(
             "/products",
             json={
@@ -275,6 +415,7 @@ def test_invalid_payload_returns_safe_validation_details():
                 "minimum_quantity": -1,
                 "price": -1,
             },
+            headers=headers,
         )
 
     assert response.status_code == 422
@@ -454,6 +595,7 @@ def test_create_stock_entry_updates_product_quantity():
         response = client.post(
             f"/products/{product['id']}/movements/entry",
             json={"movement_type": "entry", "quantity": 5, "note": "Reposição"},
+            headers=get_auth_headers(client),
         )
 
         assert response.status_code == 201
@@ -472,6 +614,7 @@ def test_create_stock_exit_updates_product_quantity():
         response = client.post(
             f"/products/{product['id']}/movements/exit",
             json={"movement_type": "exit", "quantity": 4, "note": "Venda"},
+            headers=get_auth_headers(client),
         )
 
         assert response.status_code == 201
@@ -490,6 +633,7 @@ def test_stock_exit_larger_than_available_stock_is_rejected():
         response = client.post(
             f"/products/{product['id']}/movements/exit",
             json={"movement_type": "exit", "quantity": 5},
+            headers=get_auth_headers(client),
         )
 
     assert response.status_code == 409
@@ -509,6 +653,7 @@ def test_movement_for_nonexistent_product_is_rejected():
         response = client.post(
             "/products/999/movements/entry",
             json={"movement_type": "entry", "quantity": 1},
+            headers=get_auth_headers(client),
         )
 
     assert response.status_code == 404
@@ -522,6 +667,7 @@ def test_incorrect_movement_type_for_route_is_rejected():
         response = client.post(
             f"/products/{product['id']}/movements/exit",
             json={"movement_type": "entry", "quantity": 1},
+            headers=get_auth_headers(client),
         )
 
     assert response.status_code == 400
@@ -535,10 +681,12 @@ def test_list_stock_movements_returns_most_recent_first():
         entry_response = client.post(
             f"/products/{product['id']}/movements/entry",
             json={"movement_type": "entry", "quantity": 5},
+            headers=get_auth_headers(client),
         )
         exit_response = client.post(
             f"/products/{product['id']}/movements/exit",
             json={"movement_type": "exit", "quantity": 4},
+            headers=get_auth_headers(client),
         )
         movements_response = client.get("/movements")
 
@@ -565,6 +713,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
                 "minimum_quantity": 5,
                 "price": 10.0,
             },
+            headers=get_auth_headers(client),
         )
         equal_to_minimum = client.post(
             "/products",
@@ -575,6 +724,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
                 "minimum_quantity": 3,
                 "price": 10.0,
             },
+            headers=get_auth_headers(client),
         )
         below_minimum = client.post(
             "/products",
@@ -585,6 +735,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
                 "minimum_quantity": 2,
                 "price": 10.0,
             },
+            headers=get_auth_headers(client),
         )
         response = client.get("/products/low-stock")
 
@@ -641,7 +792,9 @@ def test_dashboard_summary_calculates_inventory_indicators():
 
     with TestClient(app) as client:
         for product in products:
-            create_response = client.post("/products", json=product)
+            create_response = client.post(
+                "/products", json=product, headers=get_auth_headers(client)
+            )
             assert create_response.status_code == 200
 
         response = client.get("/dashboard/summary")
@@ -664,6 +817,7 @@ def test_dashboard_summary_returns_five_most_recent_movements():
             response = client.post(
                 f"/products/{product['id']}/movements/entry",
                 json={"movement_type": "entry", "quantity": quantity},
+                headers=get_auth_headers(client),
             )
             assert response.status_code == 201
             movement_responses.append(response.json())
