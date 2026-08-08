@@ -64,6 +64,52 @@ def test_create_product_returns_id():
     assert isinstance(product["id"], int)
 
 
+def test_product_not_found_errors_are_standardized():
+    product_data = {
+        "name": "Produto válido",
+        "category": "Teste",
+        "minimum_quantity": 2,
+        "price": 10.5,
+    }
+
+    with TestClient(app) as client:
+        get_response = client.get("/products/999")
+        update_response = client.put("/products/999", json=product_data)
+        delete_response = client.delete("/products/999")
+
+    for response in (get_response, update_response, delete_response):
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "PRODUCT_NOT_FOUND"
+        assert response.json()["error"]["message"] == "Produto não encontrado"
+
+
+def test_invalid_payload_returns_safe_validation_details():
+    with TestClient(app) as client:
+        response = client.post(
+            "/products",
+            json={
+                "name": "A",
+                "category": "",
+                "quantity": -1,
+                "minimum_quantity": -1,
+                "price": -1,
+            },
+        )
+
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert error["message"] == "Dados de entrada inválidos"
+    assert {detail["field"] for detail in error["details"]} == {
+        "body.name",
+        "body.category",
+        "body.quantity",
+        "body.minimum_quantity",
+        "body.price",
+    }
+    assert all("input" not in detail for detail in error["details"])
+
+
 def test_list_products_uses_default_pagination():
     with TestClient(app) as client:
         for index in range(21):
@@ -216,6 +262,8 @@ def test_list_products_rejects_invalid_pagination_values():
 
     assert oversized_response.status_code == 422
     assert invalid_page_response.status_code == 422
+    assert oversized_response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert invalid_page_response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_create_stock_entry_updates_product_quantity():
@@ -263,10 +311,13 @@ def test_stock_exit_larger_than_available_stock_is_rejected():
             json={"movement_type": "exit", "quantity": 5},
         )
 
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Estoque insuficiente"
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "INSUFFICIENT_STOCK",
+        "message": "Estoque insuficiente",
+    }
 
-        product_response = client.get(f"/products/{product['id']}")
+    product_response = client.get(f"/products/{product['id']}")
 
     assert product_response.status_code == 200
     assert product_response.json()["quantity"] == 3
@@ -280,7 +331,7 @@ def test_movement_for_nonexistent_product_is_rejected():
         )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Produto não encontrado"
+    assert response.json()["error"]["code"] == "PRODUCT_NOT_FOUND"
 
 
 def test_incorrect_movement_type_for_route_is_rejected():
@@ -293,7 +344,7 @@ def test_incorrect_movement_type_for_route_is_rejected():
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Tipo de movimentação inválido para esta rota"
+    assert response.json()["error"]["code"] == "INVALID_MOVEMENT_TYPE"
 
 
 def test_list_stock_movements_returns_most_recent_first():

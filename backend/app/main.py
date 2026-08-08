@@ -1,4 +1,8 @@
-from fastapi import Depends, FastAPI, HTTPException, Query
+import logging
+
+from fastapi import Depends, FastAPI, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -6,10 +10,54 @@ from sqlalchemy.orm import Session
 from app import models
 from app import schemas
 from app.database import Base, engine, get_db, normalize_search_text
+from app.errors import APIError, product_not_found_error
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
+
+
+def error_response(status_code: int, code: str, message: str, **extra):
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"code": code, "message": message, **extra}},
+    )
+
+
+@app.exception_handler(APIError)
+async def api_error_handler(_request: Request, exc: APIError):
+    return error_response(exc.status_code, exc.code, exc.message)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_request: Request, exc: RequestValidationError):
+    details = [
+        {
+            "field": ".".join(str(location) for location in error["loc"]),
+            "message": error["msg"],
+            "type": error["type"],
+        }
+        for error in exc.errors()
+    ]
+    return error_response(
+        422,
+        "VALIDATION_ERROR",
+        "Dados de entrada inválidos",
+        details=details,
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def database_error_handler(_request: Request, exc: SQLAlchemyError):
+    logger.exception("Database error while processing request", exc_info=exc)
+    return error_response(500, "DATABASE_ERROR", "Erro interno ao processar dados")
+
+
+@app.exception_handler(Exception)
+async def internal_error_handler(_request: Request, exc: Exception):
+    logger.exception("Unexpected error while processing request", exc_info=exc)
+    return error_response(500, "INTERNAL_SERVER_ERROR", "Erro interno do servidor")
 
 
 def filter_by_low_stock(query, low_stock: bool):
@@ -110,7 +158,7 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
 def get_product(product_id: int, db: Session = Depends(get_db)):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
-        raise HTTPException(status_code=404, detail="Produto não encontrado")
+        raise product_not_found_error()
     return product
 
 
@@ -122,7 +170,7 @@ def update_product(
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
-        raise HTTPException(status_code=404, detail="Produto não encontrado")
+        raise product_not_found_error()
 
     product.name = product_data.name
     product.category = product_data.category
@@ -138,7 +186,7 @@ def update_product(
 def delete_product(product_id: int, db: Session = Depends(get_db)):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
-        raise HTTPException(status_code=404, detail="Produto não encontrado")
+        raise product_not_found_error()
 
     db.delete(product)
     db.commit()
@@ -156,14 +204,15 @@ def create_stock_entry(
     db: Session = Depends(get_db),
 ):
     if movement_data.movement_type != "entry":
-        raise HTTPException(
+        raise APIError(
             status_code=400,
-            detail="Tipo de movimentação inválido para esta rota",
+            code="INVALID_MOVEMENT_TYPE",
+            message="Tipo de movimentação inválido para esta rota",
         )
 
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
-        raise HTTPException(status_code=404, detail="Produto não encontrado")
+        raise product_not_found_error()
 
     product.quantity += movement_data.quantity
     movement = models.StockMovement(
@@ -195,17 +244,22 @@ def create_stock_exit(
     db: Session = Depends(get_db),
 ):
     if movement_data.movement_type != "exit":
-        raise HTTPException(
+        raise APIError(
             status_code=400,
-            detail="Tipo de movimentação inválido para esta rota",
+            code="INVALID_MOVEMENT_TYPE",
+            message="Tipo de movimentação inválido para esta rota",
         )
 
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
-        raise HTTPException(status_code=404, detail="Produto não encontrado")
+        raise product_not_found_error()
 
     if movement_data.quantity > product.quantity:
-        raise HTTPException(status_code=400, detail="Estoque insuficiente")
+        raise APIError(
+            status_code=409,
+            code="INSUFFICIENT_STOCK",
+            message="Estoque insuficiente",
+        )
 
     product.quantity -= movement_data.quantity
     movement = models.StockMovement(
