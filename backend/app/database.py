@@ -1,7 +1,29 @@
-from sqlalchemy import create_engine
+import sqlite3
+import unicodedata
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = "sqlite:///./deposita.db"
+
+
+def normalize_search_text(value: str | None) -> str:
+    if value is None:
+        return ""
+
+    normalized_value = unicodedata.normalize("NFD", value)
+    return "".join(
+        character
+        for character in normalized_value
+        if not unicodedata.combining(character)
+    ).casefold()
+
+
+@event.listens_for(Engine, "connect")
+def register_sqlite_functions(dbapi_connection, _connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        dbapi_connection.create_function("normalize_search_text", 1, normalize_search_text)
 
 engine = create_engine(
     DATABASE_URL,

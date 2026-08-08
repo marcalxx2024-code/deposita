@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app import schemas
-from app.database import Base, engine, get_db
+from app.database import Base, engine, get_db, normalize_search_text
 
 Base.metadata.create_all(bind=engine)
 
@@ -48,7 +48,12 @@ def list_products(
     query = db.query(models.Product)
 
     if search is not None:
-        query = query.filter(models.Product.name.ilike(f"%{search}%"))
+        normalized_search = normalize_search_text(search)
+        query = query.filter(
+            func.normalize_search_text(models.Product.name).like(
+                f"%{normalized_search}%"
+            )
+        )
 
     if low_stock is not None:
         query = filter_by_low_stock(query, low_stock)

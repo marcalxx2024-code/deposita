@@ -111,6 +111,67 @@ def test_list_products_searches_name_case_insensitively():
     assert [product["id"] for product in data["items"]] == [matching_product["id"]]
 
 
+def test_list_products_searches_names_without_accents():
+    with TestClient(app) as client:
+        coffee = create_product(client, quantity=5, name="Café especial")
+        sugar = create_product(client, quantity=5, name="Açúcar mascavo")
+        soap = create_product(client, quantity=5, name="Sabão em pó")
+
+        coffee_response = client.get("/products", params={"search": "cafe"})
+        sugar_response = client.get("/products", params={"search": "acucar"})
+        soap_response = client.get("/products", params={"search": "sabao"})
+        upper_case_response = client.get("/products", params={"search": "CAFE"})
+        partial_response = client.get("/products", params={"search": "acu"})
+
+    assert [product["id"] for product in coffee_response.json()["items"]] == [
+        coffee["id"]
+    ]
+    assert [product["id"] for product in sugar_response.json()["items"]] == [
+        sugar["id"]
+    ]
+    assert [product["id"] for product in soap_response.json()["items"]] == [soap["id"]]
+    assert [product["id"] for product in upper_case_response.json()["items"]] == [
+        coffee["id"]
+    ]
+    assert [product["id"] for product in partial_response.json()["items"]] == [
+        sugar["id"]
+    ]
+
+
+def test_list_products_combines_accent_insensitive_search_with_pagination():
+    with TestClient(app) as client:
+        create_product(client, quantity=5, name="Café primeiro")
+        second_coffee = create_product(client, quantity=5, name="Café segundo")
+        create_product(client, quantity=5, name="Café terceiro")
+
+        response = client.get(
+            "/products", params={"search": "cafe", "page": 2, "page_size": 1}
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    assert data["pages"] == 3
+    assert [product["id"] for product in data["items"]] == [second_coffee["id"]]
+
+
+def test_list_products_combines_accent_insensitive_search_with_low_stock():
+    with TestClient(app) as client:
+        low_stock_coffee = create_product(
+            client, quantity=1, minimum_quantity=2, name="Café baixo"
+        )
+        create_product(client, quantity=3, minimum_quantity=2, name="Café normal")
+
+        response = client.get(
+            "/products", params={"search": "cafe", "low_stock": True}
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert [product["id"] for product in data["items"]] == [low_stock_coffee["id"]]
+
+
 def test_list_products_filters_low_stock_and_combines_filters_with_pagination():
     with TestClient(app) as client:
         low_stock_first = create_product(
