@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from jwt import InvalidTokenError
-from sqlalchemy import func
+from sqlalchemy import func, inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app import schemas
 from app.database import Base, engine, get_db, normalize_search_text
 from app.errors import (
     APIError,
+    forbidden_error,
     invalid_authentication_error,
     invalid_credentials_error,
     product_not_found_error,
@@ -28,6 +29,18 @@ from app.security import (
 
 validate_auth_settings()
 Base.metadata.create_all(bind=engine)
+
+
+def validate_user_role_column() -> None:
+    user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    if "role" not in user_columns:
+        raise RuntimeError(
+            "The users table is missing the role column. Update the SQLite database "
+            "manually before starting the application."
+        )
+
+
+validate_user_role_column()
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
@@ -100,6 +113,7 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = models.User(
         username=user.username,
         password_hash=hash_password(user.password),
+        role=models.UserRole.OPERATOR.value,
     )
     db.add(db_user)
 
@@ -135,6 +149,26 @@ def get_current_user(
     return user
 
 
+def require_roles(*allowed_roles: models.UserRole):
+    allowed_role_values = {role.value for role in allowed_roles}
+
+    def role_dependency(
+        current_user: models.User = Depends(get_current_user),
+    ) -> models.User:
+        if current_user.role not in allowed_role_values:
+            raise forbidden_error()
+        return current_user
+
+    return role_dependency
+
+
+require_admin = require_roles(models.UserRole.ADMIN)
+require_inventory_write = require_roles(
+    models.UserRole.ADMIN,
+    models.UserRole.OPERATOR,
+)
+
+
 @app.post("/auth/login", response_model=schemas.TokenResponse)
 def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
     user = (
@@ -162,7 +196,7 @@ def get_authenticated_user(current_user: models.User = Depends(get_current_user)
 def create_product(
     product: schemas.ProductCreate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(get_current_user),
+    _current_user: models.User = Depends(require_admin),
 ):
     db_product = models.Product(**product.model_dump())
     db.add(db_product)
@@ -253,7 +287,7 @@ def update_product(
     product_id: int,
     product_data: schemas.ProductUpdate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(get_current_user),
+    _current_user: models.User = Depends(require_admin),
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
@@ -273,7 +307,7 @@ def update_product(
 def delete_product(
     product_id: int,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(get_current_user),
+    _current_user: models.User = Depends(require_admin),
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
@@ -293,7 +327,7 @@ def create_stock_entry(
     product_id: int,
     movement_data: schemas.StockMovementCreate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(get_current_user),
+    _current_user: models.User = Depends(require_inventory_write),
 ):
     if movement_data.movement_type != "entry":
         raise APIError(
@@ -334,7 +368,7 @@ def create_stock_exit(
     product_id: int,
     movement_data: schemas.StockMovementCreate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(get_current_user),
+    _current_user: models.User = Depends(require_inventory_write),
 ):
     if movement_data.movement_type != "exit":
         raise APIError(

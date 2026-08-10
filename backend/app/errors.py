@@ -43,3 +43,11 @@ def invalid_authentication_error() -> APIError:
         message="Não foi possível autenticar a solicitação",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def forbidden_error() -> APIError:
+    return APIError(
+        status_code=403,
+        code="FORBIDDEN",
+        message="Você não tem permissão para esta operação",
+    )

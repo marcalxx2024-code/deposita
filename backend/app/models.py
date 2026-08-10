@@ -1,6 +1,7 @@
 from datetime import datetime
+from enum import Enum
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -36,10 +37,19 @@ class StockMovement(Base):
     product = relationship("Product", back_populates="movements")
 
 
+class UserRole(str, Enum):
+    ADMIN = "admin"
+    OPERATOR = "operator"
+
+
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'operator')", name="valid_user_role"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, nullable=False, unique=True, index=True)
     password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False, default=UserRole.OPERATOR.value)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

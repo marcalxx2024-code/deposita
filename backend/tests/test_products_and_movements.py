@@ -8,8 +8,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import User
-from app.security import create_access_token, verify_password
+from app.models import User, UserRole
+from app.security import create_access_token, hash_password, verify_password
 
 
 TEST_DATABASE_URL = "sqlite:///./test_deposita.db"
@@ -48,20 +48,42 @@ def get_auth_headers(client: TestClient) -> dict[str, str]:
     if headers is not None:
         return headers
 
-    create_user_response = client.post(
-        "/users",
-        json={"username": "test-user", "password": "uma-senha-segura"},
-    )
-    assert create_user_response.status_code == 201
+    db = TestingSessionLocal()
+    try:
+        db.add(
+            User(
+                username="test-admin",
+                password_hash=hash_password("uma-senha-segura"),
+                role=UserRole.ADMIN.value,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
     login_response = client.post(
         "/auth/login",
-        json={"username": "test-user", "password": "uma-senha-segura"},
+        json={"username": "test-admin", "password": "uma-senha-segura"},
     )
     assert login_response.status_code == 200
 
     headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
     client._deposita_auth_headers = headers
     return headers
+
+
+def get_operator_headers(client: TestClient) -> dict[str, str]:
+    create_user_response = client.post(
+        "/users",
+        json={"username": "test-operator", "password": "uma-senha-segura"},
+    )
+    assert create_user_response.status_code == 201
+    login_response = client.post(
+        "/auth/login",
+        json={"username": "test-operator", "password": "uma-senha-segura"},
+    )
+    assert login_response.status_code == 200
+    return {"Authorization": f"Bearer {login_response.json()['access_token']}"}
 
 
 def create_product(
@@ -128,7 +150,7 @@ def test_write_endpoints_require_authentication():
         assert response.headers["www-authenticate"] == "Bearer"
 
 
-def test_write_endpoints_work_with_valid_token():
+def test_admin_can_execute_all_write_endpoints():
     product_data = {
         "name": "Produto protegido",
         "category": "Teste",
@@ -167,6 +189,100 @@ def test_write_endpoints_work_with_valid_token():
     assert entry_response.status_code == 201
     assert exit_response.status_code == 201
     assert delete_response.status_code == 200
+
+
+def test_operator_can_create_stock_movements_but_not_manage_products():
+    update_data = {
+        "name": "Produto atualizado",
+        "category": "Teste",
+        "minimum_quantity": 2,
+        "price": 10.5,
+    }
+
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        operator_headers = get_operator_headers(client)
+        entry_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 2},
+            headers=operator_headers,
+        )
+        exit_response = client.post(
+            f"/products/{product['id']}/movements/exit",
+            json={"movement_type": "exit", "quantity": 1},
+            headers=operator_headers,
+        )
+        create_response = client.post(
+            "/products",
+            json={
+                "name": "Produto do operador",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+            },
+            headers=operator_headers,
+        )
+        update_response = client.put(
+            f"/products/{product['id']}", json=update_data, headers=operator_headers
+        )
+        delete_response = client.delete(
+            f"/products/{product['id']}", headers=operator_headers
+        )
+
+    assert entry_response.status_code == 201
+    assert exit_response.status_code == 201
+    for response in (create_response, update_response, delete_response):
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_role_changes_in_the_database_apply_to_existing_tokens():
+    with TestClient(app) as client:
+        operator_headers = get_operator_headers(client)
+        product_data = {
+            "name": "Produto protegido",
+            "category": "Teste",
+            "quantity": 10,
+            "minimum_quantity": 2,
+            "price": 10.5,
+        }
+        denied_response = client.post(
+            "/products", json=product_data, headers=operator_headers
+        )
+
+        db = TestingSessionLocal()
+        try:
+            operator = db.query(User).filter(User.username == "test-operator").one()
+            operator.role = UserRole.ADMIN.value
+            db.commit()
+        finally:
+            db.close()
+
+        allowed_response = client.post(
+            "/products", json=product_data, headers=operator_headers
+        )
+
+    assert denied_response.status_code == 403
+    assert allowed_response.status_code == 200
+
+
+def test_valid_token_for_missing_user_is_rejected():
+    with TestClient(app) as client:
+        response = client.post(
+            "/products",
+            json={
+                "name": "Produto protegido",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+            },
+            headers={"Authorization": f"Bearer {create_access_token('999999')}"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_AUTHENTICATION"
 
 
 def test_write_endpoints_reject_tampered_tokens():
@@ -220,6 +336,7 @@ def test_create_user_hashes_password_and_hides_sensitive_fields():
     assert response.status_code == 201
     user_response = response.json()
     assert user_response["username"] == "guilherme"
+    assert user_response["role"] == "operator"
     assert "id" in user_response
     assert "created_at" in user_response
     assert "password" not in user_response
@@ -234,6 +351,21 @@ def test_create_user_hashes_password_and_hides_sensitive_fields():
     assert stored_user.password_hash != plain_password
     assert verify_password(plain_password, stored_user.password_hash)
     assert not verify_password("senha-incorreta", stored_user.password_hash)
+
+
+def test_create_user_does_not_accept_a_client_selected_role():
+    with TestClient(app) as client:
+        response = client.post(
+            "/users",
+            json={
+                "username": "guilherme",
+                "password": "uma-senha-segura",
+                "role": "admin",
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_create_user_rejects_duplicate_username():
