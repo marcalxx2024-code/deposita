@@ -17,6 +17,9 @@ from app.errors import (
     forbidden_error,
     invalid_authentication_error,
     invalid_credentials_error,
+    invalid_movement_type_error,
+    invalid_price_range_error,
+    insufficient_stock_error,
     product_not_found_error,
     sku_already_exists_error,
     supplier_in_use_error,
@@ -62,7 +65,8 @@ def error_response(
 
 @app.exception_handler(APIError)
 async def api_error_handler(_request: Request, exc: APIError):
-    return error_response(exc.status_code, exc.code, exc.message, exc.headers)
+    extra = {"details": exc.details} if exc.details is not None else {}
+    return error_response(exc.status_code, exc.code, exc.message, exc.headers, **extra)
 
 
 @app.exception_handler(RequestValidationError)
@@ -253,11 +257,7 @@ def list_products(
     db: Session = Depends(get_db),
 ):
     if min_price is not None and max_price is not None and min_price > max_price:
-        raise APIError(
-            status_code=422,
-            code="VALIDATION_ERROR",
-            message="min_price não pode ser maior que max_price",
-        )
+        raise invalid_price_range_error()
 
     # Keep this mapping explicit: query parameters must never select model
     # attributes directly, which prevents arbitrary column ordering.
@@ -427,11 +427,7 @@ def create_stock_entry(
     current_user: models.User = Depends(require_inventory_write),
 ):
     if movement_data.movement_type != "entry":
-        raise APIError(
-            status_code=400,
-            code="INVALID_MOVEMENT_TYPE",
-            message="Tipo de movimentação inválido para esta rota",
-        )
+        raise invalid_movement_type_error()
 
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
@@ -476,22 +472,14 @@ def create_stock_exit(
     current_user: models.User = Depends(require_inventory_write),
 ):
     if movement_data.movement_type != "exit":
-        raise APIError(
-            status_code=400,
-            code="INVALID_MOVEMENT_TYPE",
-            message="Tipo de movimentação inválido para esta rota",
-        )
+        raise invalid_movement_type_error()
 
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
         raise product_not_found_error()
 
     if movement_data.quantity > product.quantity:
-        raise APIError(
-            status_code=409,
-            code="INSUFFICIENT_STOCK",
-            message="Estoque insuficiente",
-        )
+        raise insufficient_stock_error()
 
     product.quantity -= movement_data.quantity
     movement = models.StockMovement(

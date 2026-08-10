@@ -577,6 +577,67 @@ def test_invalid_payload_returns_safe_validation_details():
     assert all("input" not in detail for detail in error["details"])
 
 
+def test_error_responses_use_a_safe_and_consistent_envelope():
+    product_data = {
+        "name": "Produto de erro",
+        "category": "Teste",
+        "quantity": 1,
+        "minimum_quantity": 0,
+        "price": 10,
+        "sku": "ERROR-001",
+    }
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        operator_headers = get_operator_headers(client)
+        unauthorized_response = client.get("/auth/me")
+        forbidden_response = client.post(
+            "/products", json=product_data, headers=operator_headers
+        )
+        not_found_response = client.get("/products/999")
+        first_user_response = client.post(
+            "/users", json={"username": "duplicado", "password": "uma-senha-segura"}
+        )
+        conflict_response = client.post(
+            "/users", json={"username": "duplicado", "password": "outra-senha-segura"}
+        )
+        validation_response = client.get(
+            "/products", params={"min_price": 20, "max_price": 10}
+        )
+        invalid_movement_response = client.post(
+            "/products/999/movements/entry",
+            json={"movement_type": "exit", "quantity": 1},
+            headers=admin_headers,
+        )
+
+    assert first_user_response.status_code == 201
+    expected_codes = (
+        (unauthorized_response, 401, "INVALID_AUTHENTICATION"),
+        (forbidden_response, 403, "FORBIDDEN"),
+        (not_found_response, 404, "PRODUCT_NOT_FOUND"),
+        (conflict_response, 409, "USERNAME_ALREADY_EXISTS"),
+        (validation_response, 422, "VALIDATION_ERROR"),
+        (invalid_movement_response, 400, "INVALID_MOVEMENT_TYPE"),
+    )
+    for response, status_code, code in expected_codes:
+        assert response.status_code == status_code
+        assert set(response.json()) == {"error"}
+        assert response.json()["error"]["code"] == code
+        assert isinstance(response.json()["error"]["message"], str)
+
+        serialized_error = json.dumps(response.json()).lower()
+        for sensitive_value in ("password", "secret", "token", "traceback", "sqlite"):
+            assert sensitive_value not in serialized_error
+
+    validation_error = validation_response.json()["error"]
+    assert validation_error["details"] == [
+        {
+            "field": "query.max_price",
+            "message": "max_price deve ser maior ou igual a min_price",
+            "type": "value_error",
+        }
+    ]
+
+
 def test_product_validation_rejects_blank_negative_and_oversized_values():
     invalid_products = (
         {"name": "   "},

@@ -5,11 +5,13 @@ class APIError(Exception):
         code: str,
         message: str,
         headers: dict[str, str] | None = None,
+        details: list[dict[str, str]] | None = None,
     ):
         self.status_code = status_code
         self.code = code
         self.message = message
         self.headers = headers
+        self.details = details
 
 
 def product_not_found_error() -> APIError:
@@ -74,4 +76,35 @@ def forbidden_error() -> APIError:
         status_code=403,
         code="FORBIDDEN",
         message="Você não tem permissão para esta operação",
+    )
+
+
+def invalid_price_range_error() -> APIError:
+    return APIError(
+        status_code=422,
+        code="VALIDATION_ERROR",
+        message="Dados de entrada inválidos",
+        details=[
+            {
+                "field": "query.max_price",
+                "message": "max_price deve ser maior ou igual a min_price",
+                "type": "value_error",
+            }
+        ],
+    )
+
+
+def invalid_movement_type_error() -> APIError:
+    return APIError(
+        status_code=400,
+        code="INVALID_MOVEMENT_TYPE",
+        message="Tipo de movimentação inválido para esta rota",
+    )
+
+
+def insufficient_stock_error() -> APIError:
+    return APIError(
+        status_code=409,
+        code="INSUFFICIENT_STOCK",
+        message="Estoque insuficiente",
     )
