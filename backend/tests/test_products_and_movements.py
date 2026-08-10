@@ -1270,7 +1270,7 @@ def test_sqlite_foreign_keys_are_enabled_and_reject_orphan_records():
         db.close()
 
 
-def test_product_with_movements_cannot_be_deleted_and_history_is_preserved():
+def test_product_with_movements_is_deactivated_and_history_is_preserved():
     with TestClient(app) as client:
         product = create_product(client, quantity=10)
         headers = get_auth_headers(client)
@@ -1281,18 +1281,26 @@ def test_product_with_movements_cannot_be_deleted_and_history_is_preserved():
         )
         delete_response = client.delete(f"/products/{product['id']}", headers=headers)
         product_response = client.get(f"/products/{product['id']}")
+        list_response = client.get("/products")
+        include_inactive_response = client.get(
+            "/products", params={"include_inactive": True}
+        )
         movements_response = client.get("/movements")
 
     assert movement_response.status_code == 201
-    assert delete_response.status_code == 409
-    assert delete_response.json()["error"]["code"] == "PRODUCT_HAS_MOVEMENTS"
+    assert delete_response.status_code == 200
     assert product_response.status_code == 200
+    assert product_response.json()["is_active"] is False
+    assert list_response.json()["items"] == []
+    assert [item["id"] for item in include_inactive_response.json()["items"]] == [
+        product["id"]
+    ]
     assert [movement["id"] for movement in movements_response.json()] == [
         movement_response.json()["id"]
     ]
 
 
-def test_product_without_movements_can_be_deleted():
+def test_product_without_movements_is_not_physically_deleted():
     with TestClient(app) as client:
         product = create_product(client, quantity=10)
         delete_response = client.delete(
@@ -1301,7 +1309,80 @@ def test_product_without_movements_can_be_deleted():
         product_response = client.get(f"/products/{product['id']}")
 
     assert delete_response.status_code == 200
-    assert product_response.status_code == 404
+    assert product_response.status_code == 200
+    assert product_response.json()["is_active"] is False
+
+
+def test_inactive_product_blocks_updates_and_movements_until_reactivated():
+    update_data = {
+        "name": "Produto inativo atualizado",
+        "category": "Teste",
+        "minimum_quantity": 2,
+        "price": 11.0,
+    }
+
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        headers = get_auth_headers(client)
+        deactivate_response = client.delete(f"/products/{product['id']}", headers=headers)
+        update_response = client.put(
+            f"/products/{product['id']}", json=update_data, headers=headers
+        )
+        entry_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 1},
+            headers=headers,
+        )
+        exit_response = client.post(
+            f"/products/{product['id']}/movements/exit",
+            json={"movement_type": "exit", "quantity": 1},
+            headers=headers,
+        )
+        reactivate_response = client.post(
+            f"/products/{product['id']}/reactivate", headers=headers
+        )
+        entry_after_reactivate_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 1},
+            headers=headers,
+        )
+        audit_response = client.get("/audit-logs", headers=headers)
+
+    assert deactivate_response.status_code == 200
+    assert update_response.status_code == 409
+    assert entry_response.status_code == 409
+    assert exit_response.status_code == 409
+    for response in (update_response, entry_response, exit_response):
+        assert response.json()["error"]["code"] == "PRODUCT_INACTIVE"
+    assert reactivate_response.status_code == 200
+    assert reactivate_response.json()["is_active"] is True
+    assert entry_after_reactivate_response.status_code == 201
+    assert [audit["action"] for audit in audit_response.json()] == [
+        "stock_entry",
+        "product_reactivated",
+        "product_deactivated",
+        "product_created",
+    ]
+
+
+def test_inactive_products_are_ignored_by_low_stock_and_dashboard():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=1, minimum_quantity=2)
+        deactivate_response = client.delete(
+            f"/products/{product['id']}", headers=get_auth_headers(client)
+        )
+        low_stock_response = client.get("/products/low-stock")
+        dashboard_response = client.get("/dashboard/summary")
+
+    assert product["is_active"] is True
+    assert deactivate_response.status_code == 200
+    assert low_stock_response.json() == []
+    assert dashboard_response.json() == {
+        "total_products": 0,
+        "total_stock_quantity": 0,
+        "low_stock_products": 0,
+        "recent_movements": [],
+    }
 
 
 def create_concurrent_stock_database(tmp_path, quantity: int):
@@ -1794,12 +1875,12 @@ def test_audit_logs_record_product_and_stock_actions():
     assert update_response.status_code == 200
     assert entry_response.status_code == 201
     assert exit_response.status_code == 201
-    assert delete_response.status_code == 409
-    assert delete_response.json()["error"]["code"] == "PRODUCT_HAS_MOVEMENTS"
+    assert delete_response.status_code == 200
     assert audit_response.status_code == 200
 
     audit_logs = audit_response.json()
     assert [audit_log["action"] for audit_log in audit_logs] == [
+        "product_deactivated",
         "stock_exit",
         "stock_entry",
         "product_updated",

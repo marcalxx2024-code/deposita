@@ -1,7 +1,16 @@
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TypeDecorator
 
@@ -61,6 +70,7 @@ class Product(Base):
     price = Column(Float, nullable=False, default=0)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True, index=True)
     sku = Column(String, nullable=False, unique=True, index=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
 
     supplier = relationship("Supplier", back_populates="products")
 

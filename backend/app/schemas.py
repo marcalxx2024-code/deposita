@@ -97,6 +97,7 @@ class ProductResponse(ProductBase):
     id: int
     sku: str
     supplier_id: int | None
+    is_active: bool
 
     model_config = ConfigDict(from_attributes=True)
 

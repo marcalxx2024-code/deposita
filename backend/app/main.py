@@ -22,7 +22,7 @@ from app.errors import (
     invalid_movement_type_error,
     invalid_price_range_error,
     insufficient_stock_error,
-    product_has_movements_error,
+    product_inactive_error,
     product_not_found_error,
     sku_already_exists_error,
     supplier_in_use_error,
@@ -117,7 +117,10 @@ def filter_by_low_stock(query, low_stock: bool):
 
 
 def low_stock_products_query(db: Session):
-    return filter_by_low_stock(db.query(models.Product), low_stock=True)
+    return filter_by_low_stock(
+        db.query(models.Product).filter(models.Product.is_active.is_(True)),
+        low_stock=True,
+    )
 
 
 def get_supplier_or_error(supplier_id: int, db: Session) -> models.Supplier:
@@ -289,6 +292,7 @@ def list_products(
     category: str | None = None,
     supplier_id: int | None = Query(default=None, ge=1),
     low_stock: bool | None = None,
+    include_inactive: bool = False,
     min_price: float | None = Query(default=None, ge=0),
     max_price: float | None = Query(default=None, ge=0),
     sort_by: Literal["name", "sku", "price", "quantity", "id"] = "id",
@@ -310,6 +314,8 @@ def list_products(
         "id": models.Product.id,
     }
     query = db.query(models.Product)
+    if not include_inactive:
+        query = query.filter(models.Product.is_active.is_(True))
 
     if search is not None:
         normalized_search = normalize_search_text(search)
@@ -369,13 +375,16 @@ def list_low_stock_products(db: Session = Depends(get_db)):
 
 @app.get("/dashboard/summary", response_model=schemas.DashboardSummaryResponse)
 def get_dashboard_summary(db: Session = Depends(get_db)):
-    total_products = db.query(models.Product).count()
-    total_stock_quantity = db.query(
+    active_products = db.query(models.Product).filter(models.Product.is_active.is_(True))
+    total_products = active_products.count()
+    total_stock_quantity = active_products.with_entities(
         func.coalesce(func.sum(models.Product.quantity), 0)
     ).scalar()
     low_stock_products = low_stock_products_query(db).count()
     recent_movements = (
         db.query(models.StockMovement)
+        .join(models.Product)
+        .filter(models.Product.is_active.is_(True))
         .order_by(models.StockMovement.created_at.desc(), models.StockMovement.id.desc())
         .limit(5)
         .all()
@@ -407,6 +416,8 @@ def update_product(
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
         raise product_not_found_error()
+    if not product.is_active:
+        raise product_inactive_error()
 
     try:
         product.name = product_data.name
@@ -445,22 +456,49 @@ def delete_product(
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
         raise product_not_found_error()
-    if db.query(models.StockMovement.id).filter(
-        models.StockMovement.product_id == product_id
-    ).first():
-        raise product_has_movements_error()
+    if not product.is_active:
+        return {"message": "Produto jÃ¡ estÃ¡ inativo"}
 
+    product.is_active = False
     db.add(
         models.AuditLog(
             user_id=current_user.id,
-            action="product_deleted",
+            action="product_deactivated",
             resource_type="product",
             resource_id=product.id,
         )
     )
-    db.delete(product)
     db.commit()
-    return {"message": "Produto excluído com sucesso"}
+    return {"message": "Produto inativado com sucesso"}
+
+
+@app.post(
+    "/products/{product_id}/reactivate",
+    response_model=schemas.ProductResponse,
+)
+def reactivate_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if product is None:
+        raise product_not_found_error()
+    if product.is_active:
+        return product
+
+    product.is_active = True
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="product_reactivated",
+            resource_type="product",
+            resource_id=product.id,
+        )
+    )
+    db.commit()
+    db.refresh(product)
+    return product
 
 
 @app.post(
@@ -480,12 +518,18 @@ def create_stock_entry(
     try:
         result = db.execute(
             update(models.Product)
-            .where(models.Product.id == product_id)
+            .where(
+                models.Product.id == product_id,
+                models.Product.is_active.is_(True),
+            )
             .values(quantity=models.Product.quantity + movement_data.quantity)
         )
         if result.rowcount != 1:
             db.rollback()
-            raise product_not_found_error()
+            product = db.get(models.Product, product_id)
+            if product is None:
+                raise product_not_found_error()
+            raise product_inactive_error()
 
         movement = models.StockMovement(
             product_id=product_id,
@@ -531,15 +575,18 @@ def create_stock_exit(
             update(models.Product)
             .where(
                 models.Product.id == product_id,
+                models.Product.is_active.is_(True),
                 models.Product.quantity >= movement_data.quantity,
             )
             .values(quantity=models.Product.quantity - movement_data.quantity)
         )
         if result.rowcount != 1:
-            product_exists = db.get(models.Product, product_id) is not None
             db.rollback()
-            if not product_exists:
+            product = db.get(models.Product, product_id)
+            if product is None:
                 raise product_not_found_error()
+            if not product.is_active:
+                raise product_inactive_error()
             raise insufficient_stock_error()
 
         movement = models.StockMovement(

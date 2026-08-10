@@ -22,11 +22,11 @@ def product_not_found_error() -> APIError:
     )
 
 
-def product_has_movements_error() -> APIError:
+def product_inactive_error() -> APIError:
     return APIError(
         status_code=409,
-        code="PRODUCT_HAS_MOVEMENTS",
-        message="Produto possui movimentações de estoque",
+        code="PRODUCT_INACTIVE",
+        message="Produto estÃ¡ inativo",
     )
 
 

@@ -97,6 +97,13 @@ de iniciar a API:
 python -m alembic upgrade head
 ```
 
+Em um banco novo, crie manualmente o primeiro ADMIN. O comando solicita a senha
+sem colocá-la no histórico do terminal e recusa execução se já existir ADMIN:
+
+```powershell
+python -m app.bootstrap_admin --username admin
+```
+
 Inicie o servidor:
 
 ```powershell
@@ -107,19 +114,26 @@ A documentação interativa Swagger estará em [http://127.0.0.1:8000/docs](http
 
 ## Autorização e auditoria
 
-- `ADMIN`: administra produtos e fornecedores, além de consultar auditoria.
+- `ADMIN`: administra produtos, fornecedores e contas OPERATOR, além de
+  consultar auditoria.
 - `OPERATOR`: pode registrar entradas e saídas de estoque, sem administrar
   produtos ou fornecedores.
 
-As ações de criação, atualização e exclusão de produtos/fornecedores, além das
+`POST /users` exige ADMIN e sempre cria uma conta `OPERATOR`. A API não cria
+ADMINs: o primeiro é criado pelo comando de bootstrap para evitar auto-registro
+com permissão operacional ou escalada de privilégio por payload.
+
+As ações de criação, atualização, inativação de produtos e exclusão de fornecedores, além das
 movimentações de estoque, geram registros de auditoria vinculados ao usuário.
 
 ## Produtos, fornecedores e estoque
 
 Cada produto possui SKU único, normalizado em maiúsculas. Um produto pode ter
 um fornecedor opcional; fornecedores com produtos associados não podem ser
-excluídos. As saídas de estoque são rejeitadas quando a quantidade solicitada
-é maior que o saldo disponível.
+excluídos. `DELETE /products/{id}` inativa o produto e preserva seu histórico;
+produtos inativos não aceitam movimentações nem atualização até serem reativados
+por ADMIN em `POST /products/{id}/reactivate`. As saídas de estoque são rejeitadas
+quando a quantidade solicitada é maior que o saldo disponível.
 
 ### `GET /products`
 
@@ -127,7 +141,7 @@ A listagem retorna `items`, `page`, `page_size`, `total` e `pages`.
 
 - Paginação: `page` começa em 1; `page_size` tem padrão 20 e máximo 100.
 - Filtros: `search` (nome e SKU), `category`, `supplier_id`, `low_stock`,
-  `min_price` e `max_price`.
+  `min_price`, `max_price` e `include_inactive`.
 - Ordenação: `sort_by` aceita `name`, `sku`, `price`, `quantity` ou `id`;
   `sort_order` aceita `asc` ou `desc`.
 
