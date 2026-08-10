@@ -367,12 +367,16 @@ def list_products(
 
 @app.get("/products/low-stock", response_model=list[schemas.ProductResponse])
 def list_low_stock_products(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     _current_user: models.User = Depends(get_current_user),
 ):
     return (
         low_stock_products_query(db)
         .order_by(models.Product.quantity.asc(), models.Product.id.asc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 

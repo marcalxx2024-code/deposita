@@ -1872,12 +1872,17 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
             },
             headers=get_auth_headers(client),
         )
-        response = client.get("/products/low-stock", headers=get_auth_headers(client))
+        headers = get_auth_headers(client)
+        response = client.get("/products/low-stock", headers=headers)
+        limit_response = client.get("/products/low-stock?limit=1", headers=headers)
+        skip_response = client.get("/products/low-stock?skip=1", headers=headers)
 
     assert above_minimum.status_code == 200
     assert equal_to_minimum.status_code == 200
     assert below_minimum.status_code == 200
     assert response.status_code == 200
+    assert limit_response.status_code == 200
+    assert skip_response.status_code == 200
 
     products = response.json()
     assert [product["id"] for product in products] == [
@@ -1885,6 +1890,22 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
         equal_to_minimum.json()["id"],
     ]
     assert [product["quantity"] for product in products] == [1, 3]
+    assert [product["id"] for product in limit_response.json()] == [
+        below_minimum.json()["id"]
+    ]
+    assert [product["id"] for product in skip_response.json()] == [
+        equal_to_minimum.json()["id"]
+    ]
+
+
+@pytest.mark.parametrize("query", ["limit=101", "limit=0", "skip=-1"])
+def test_list_low_stock_products_rejects_invalid_pagination(query):
+    with TestClient(app) as client:
+        response = client.get(
+            f"/products/low-stock?{query}", headers=get_auth_headers(client)
+        )
+
+    assert response.status_code == 422
 
 
 def test_dashboard_summary_returns_zeros_for_empty_database():
