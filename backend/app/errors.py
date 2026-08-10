@@ -20,6 +20,14 @@ def product_not_found_error() -> APIError:
     )
 
 
+def sku_already_exists_error() -> APIError:
+    return APIError(
+        status_code=409,
+        code="SKU_ALREADY_EXISTS",
+        message="SKU jÃ¡ estÃ¡ em uso",
+    )
+
+
 def supplier_not_found_error() -> APIError:
     return APIError(
         status_code=404,

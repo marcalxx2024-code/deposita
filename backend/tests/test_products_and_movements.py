@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from itertools import count
 
 import jwt
 from fastapi.testclient import TestClient
@@ -23,6 +24,7 @@ TestingSessionLocal = sessionmaker(
     autoflush=False,
     bind=test_engine,
 )
+product_sku_counter = count(1)
 
 
 def override_get_db():
@@ -92,6 +94,7 @@ def create_product(
     quantity: int,
     name: str = "Produto de teste",
     minimum_quantity: int = 2,
+    sku: str | None = None,
 ) -> dict:
     response = client.post(
         "/products",
@@ -101,6 +104,7 @@ def create_product(
             "quantity": quantity,
             "minimum_quantity": minimum_quantity,
             "price": 10.5,
+            "sku": sku or f"TEST-{next(product_sku_counter)}",
         },
         headers=get_auth_headers(client),
     )
@@ -122,6 +126,7 @@ def test_write_endpoints_require_authentication():
         "quantity": 10,
         "minimum_quantity": 2,
         "price": 10.5,
+        "sku": "PROTEGIDO-01",
     }
     update_data = {
         "name": "Produto protegido",
@@ -158,6 +163,7 @@ def test_admin_can_execute_all_write_endpoints():
         "quantity": 10,
         "minimum_quantity": 2,
         "price": 10.5,
+        "sku": "PROTEGIDO-ADMIN-01",
     }
     update_data = {
         "name": "Produto atualizado",
@@ -247,6 +253,7 @@ def test_role_changes_in_the_database_apply_to_existing_tokens():
             "quantity": 10,
             "minimum_quantity": 2,
             "price": 10.5,
+            "sku": "PROTEGIDO-01",
         }
         denied_response = client.post(
             "/products", json=product_data, headers=operator_headers
@@ -547,6 +554,7 @@ def test_invalid_payload_returns_safe_validation_details():
                 "quantity": -1,
                 "minimum_quantity": -1,
                 "price": -1,
+                "sku": "INVALIDO-01",
             },
             headers=headers,
         )
@@ -845,6 +853,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
                 "quantity": 6,
                 "minimum_quantity": 5,
                 "price": 10.0,
+                "sku": "ESTOQUE-ACIMA",
             },
             headers=get_auth_headers(client),
         )
@@ -856,6 +865,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
                 "quantity": 3,
                 "minimum_quantity": 3,
                 "price": 10.0,
+                "sku": "ESTOQUE-MINIMO",
             },
             headers=get_auth_headers(client),
         )
@@ -867,6 +877,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
                 "quantity": 1,
                 "minimum_quantity": 2,
                 "price": 10.0,
+                "sku": "ESTOQUE-BAIXO",
             },
             headers=get_auth_headers(client),
         )
@@ -906,6 +917,7 @@ def test_dashboard_summary_calculates_inventory_indicators():
             "quantity": 10,
             "minimum_quantity": 3,
             "price": 2.5,
+            "sku": "ESTOQUE-NORMAL",
         },
         {
             "name": "Estoque baixo",
@@ -913,6 +925,7 @@ def test_dashboard_summary_calculates_inventory_indicators():
             "quantity": 2,
             "minimum_quantity": 2,
             "price": 3.25,
+            "sku": "ESTOQUE-BAIXO",
         },
         {
             "name": "Estoque zerado",
@@ -920,6 +933,7 @@ def test_dashboard_summary_calculates_inventory_indicators():
             "quantity": 0,
             "minimum_quantity": 1,
             "price": 7.0,
+            "sku": "ESTOQUE-ZERADO",
         },
     ]
 
@@ -1159,6 +1173,7 @@ def test_products_can_optionally_reference_a_supplier_and_validate_supplier_id()
                 "minimum_quantity": 2,
                 "price": 10.5,
                 "supplier_id": supplier_id,
+                "sku": "COM-FORNECEDOR",
             },
             headers=admin_headers,
         )
@@ -1172,6 +1187,7 @@ def test_products_can_optionally_reference_a_supplier_and_validate_supplier_id()
                 "minimum_quantity": 2,
                 "price": 10.5,
                 "supplier_id": 999,
+                "sku": "FORNECEDOR-INVALIDO",
             },
             headers=admin_headers,
         )
@@ -1213,6 +1229,7 @@ def test_cannot_delete_supplier_associated_with_a_product():
                 "minimum_quantity": 2,
                 "price": 10.5,
                 "supplier_id": supplier_id,
+                "sku": "PRODUTO-ASSOCIADO",
             },
             headers=admin_headers,
         )
@@ -1225,3 +1242,81 @@ def test_cannot_delete_supplier_associated_with_a_product():
     assert delete_response.json()["error"]["code"] == "SUPPLIER_IN_USE"
     assert product_after_delete_attempt.status_code == 200
     assert product_after_delete_attempt.json()["supplier_id"] == supplier_id
+
+
+def test_product_sku_is_required_normalized_and_returned():
+    product_data = {
+        "name": "Cabo HDMI",
+        "category": "Cabos",
+        "quantity": 10,
+        "minimum_quantity": 2,
+        "price": 10.5,
+        "sku": "  cabo-hdmi-02  ",
+    }
+
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        create_response = client.post(
+            "/products", json=product_data, headers=admin_headers
+        )
+        invalid_response = client.post(
+            "/products",
+            json={**product_data, "name": "Produto invalido", "sku": "   "},
+            headers=admin_headers,
+        )
+
+    assert create_response.status_code == 200
+    assert create_response.json()["sku"] == "CABO-HDMI-02"
+    assert invalid_response.status_code == 422
+    assert invalid_response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_product_creation_rejects_duplicate_sku():
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        first_product = create_product(client, quantity=10, sku="BEB-0001")
+        duplicate_response = client.post(
+            "/products",
+            json={
+                "name": "Outro produto",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+                "sku": " beb-0001 ",
+            },
+            headers=admin_headers,
+        )
+
+    assert first_product["sku"] == "BEB-0001"
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json()["error"]["code"] == "SKU_ALREADY_EXISTS"
+
+
+def test_product_sku_can_be_updated_and_searched():
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        product = create_product(client, quantity=10, sku="PROD-ANTIGO")
+        other_product = create_product(client, quantity=10, sku="PROD-OUTRO")
+        update_payload = {
+            "name": "Produto atualizado",
+            "category": "Teste",
+            "minimum_quantity": 2,
+            "price": 10.5,
+            "sku": " prod-novo ",
+        }
+        update_response = client.put(
+            f"/products/{product['id']}", json=update_payload, headers=admin_headers
+        )
+        duplicate_update_response = client.put(
+            f"/products/{other_product['id']}",
+            json={**update_payload, "sku": "PROD-NOVO"},
+            headers=admin_headers,
+        )
+        search_response = client.get("/products", params={"search": "novo"})
+
+    assert update_response.status_code == 200
+    assert update_response.json()["sku"] == "PROD-NOVO"
+    assert duplicate_update_response.status_code == 409
+    assert duplicate_update_response.json()["error"]["code"] == "SKU_ALREADY_EXISTS"
+    assert [item["id"] for item in search_response.json()["items"]] == [product["id"]]

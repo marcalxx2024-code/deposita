@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from jwt import InvalidTokenError
-from sqlalchemy import func, inspect
+from sqlalchemy import func, inspect, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from app.errors import (
     invalid_authentication_error,
     invalid_credentials_error,
     product_not_found_error,
+    sku_already_exists_error,
     supplier_in_use_error,
     supplier_not_found_error,
     username_already_exists_error,
@@ -109,6 +110,16 @@ def get_supplier_or_error(supplier_id: int, db: Session) -> models.Supplier:
     if supplier is None:
         raise supplier_not_found_error()
     return supplier
+
+
+def validate_sku_is_available(
+    sku: str, db: Session, product_id: int | None = None
+) -> None:
+    query = db.query(models.Product).filter(models.Product.sku == sku)
+    if product_id is not None:
+        query = query.filter(models.Product.id != product_id)
+    if query.first() is not None:
+        raise sku_already_exists_error()
 
 
 @app.get("/health")
@@ -208,6 +219,7 @@ def create_product(
 ):
     if product.supplier_id is not None:
         get_supplier_or_error(product.supplier_id, db)
+    validate_sku_is_available(product.sku, db)
 
     db_product = models.Product(**product.model_dump())
     db.add(db_product)
@@ -237,9 +249,13 @@ def list_products(
 
     if search is not None:
         normalized_search = normalize_search_text(search)
+        normalized_sku_search = search.strip().upper()
         query = query.filter(
-            func.normalize_search_text(models.Product.name).like(
-                f"%{normalized_search}%"
+            or_(
+                func.normalize_search_text(models.Product.name).like(
+                    f"%{normalized_search}%"
+                ),
+                func.upper(models.Product.sku).like(f"%{normalized_sku_search}%"),
             )
         )
 
@@ -317,6 +333,9 @@ def update_product(
     product.category = product_data.category
     product.minimum_quantity = product_data.minimum_quantity
     product.price = product_data.price
+    if "sku" in product_data.model_fields_set:
+        validate_sku_is_available(product_data.sku, db, product.id)
+        product.sku = product_data.sku
     if "supplier_id" in product_data.model_fields_set:
         if product_data.supplier_id is not None:
             get_supplier_or_error(product_data.supplier_id, db)

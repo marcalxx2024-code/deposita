@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def normalize_username(value: str) -> str:
@@ -9,6 +9,13 @@ def normalize_username(value: str) -> str:
     if not normalized_username:
         raise ValueError("Username não pode estar vazio")
     return normalized_username
+
+
+def normalize_sku(value: str) -> str:
+    normalized_sku = value.strip().upper()
+    if not normalized_sku:
+        raise ValueError("SKU nÃ£o pode estar vazio")
+    return normalized_sku
 
 
 class ProductBase(BaseModel):
@@ -22,7 +29,13 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
+    sku: str
     supplier_id: int | None = None
+
+    @field_validator("sku")
+    @classmethod
+    def normalize_sku(cls, value: str) -> str:
+        return normalize_sku(value)
 
 
 class ProductUpdate(BaseModel):
@@ -30,13 +43,28 @@ class ProductUpdate(BaseModel):
     category: str = Field(min_length=2, max_length=50)
     minimum_quantity: int = Field(ge=0)
     price: float = Field(ge=0)
+    sku: str | None = None
     supplier_id: int | None = None
+
+    @field_validator("sku")
+    @classmethod
+    def normalize_sku(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_sku(value)
+
+    @model_validator(mode="after")
+    def reject_null_sku(self):
+        if "sku" in self.model_fields_set and self.sku is None:
+            raise ValueError("SKU nÃ£o pode estar vazio")
+        return self
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ProductResponse(ProductBase):
     id: int
+    sku: str
     supplier_id: int | None
 
     model_config = ConfigDict(from_attributes=True)

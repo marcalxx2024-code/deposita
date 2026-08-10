@@ -56,6 +56,7 @@ class Product(Base):
     minimum_quantity = Column(Integer, nullable=False, default=0)
     price = Column(Float, nullable=False, default=0)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True, index=True)
+    sku = Column(String, nullable=False, unique=True, index=True)
 
     supplier = relationship("Supplier", back_populates="products")
 
