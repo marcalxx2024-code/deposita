@@ -300,6 +300,7 @@ def list_products(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
 ):
     if min_price is not None and max_price is not None and min_price > max_price:
         raise invalid_price_range_error()
@@ -365,7 +366,10 @@ def list_products(
 
 
 @app.get("/products/low-stock", response_model=list[schemas.ProductResponse])
-def list_low_stock_products(db: Session = Depends(get_db)):
+def list_low_stock_products(
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
     return (
         low_stock_products_query(db)
         .order_by(models.Product.quantity.asc(), models.Product.id.asc())
@@ -374,7 +378,10 @@ def list_low_stock_products(db: Session = Depends(get_db)):
 
 
 @app.get("/dashboard/summary", response_model=schemas.DashboardSummaryResponse)
-def get_dashboard_summary(db: Session = Depends(get_db)):
+def get_dashboard_summary(
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
     active_products = db.query(models.Product).filter(models.Product.is_active.is_(True))
     total_products = active_products.count()
     total_stock_quantity = active_products.with_entities(
@@ -399,7 +406,11 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
 
 
 @app.get("/products/{product_id}", response_model=schemas.ProductResponse)
-def get_product(product_id: int, db: Session = Depends(get_db)):
+def get_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
         raise product_not_found_error()
@@ -615,7 +626,10 @@ def create_stock_exit(
 
 
 @app.get("/movements", response_model=list[schemas.StockMovementResponse])
-def list_stock_movements(db: Session = Depends(get_db)):
+def list_stock_movements(
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
     return (
         db.query(models.StockMovement)
         .order_by(models.StockMovement.created_at.desc(), models.StockMovement.id.desc())

@@ -437,25 +437,53 @@ def test_write_endpoints_reject_tampered_tokens():
     assert response.json()["error"]["code"] == "INVALID_AUTHENTICATION"
 
 
-def test_read_endpoints_remain_public():
+def test_operational_read_endpoints_require_authentication_while_health_and_login_remain_public():
     with TestClient(app) as client:
         product = create_product(client, quantity=10)
         health_response = client.get("/health")
-        list_response = client.get("/products")
-        product_response = client.get(f"/products/{product['id']}")
-        low_stock_response = client.get("/products/low-stock")
-        movements_response = client.get("/movements")
-        dashboard_response = client.get("/dashboard/summary")
+        login_response = client.post(
+            "/auth/login",
+            json={"username": "test-admin", "password": "uma-senha-segura"},
+        )
+        client.headers.clear()
+        responses = (
+            client.get("/products"),
+            client.get(f"/products/{product['id']}"),
+            client.get("/movements"),
+            client.get("/dashboard/summary"),
+            client.get("/products/low-stock"),
+            client.get("/suppliers"),
+            client.get("/suppliers/999"),
+        )
 
-    for response in (
-        health_response,
-        list_response,
-        product_response,
-        low_stock_response,
-        movements_response,
-        dashboard_response,
-    ):
-        assert response.status_code == 200
+    assert health_response.status_code == 200
+    assert login_response.status_code == 200
+    for response in responses:
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "INVALID_AUTHENTICATION"
+
+
+def test_authenticated_admin_and_operator_can_read_operational_data():
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        product = create_product(client, quantity=10)
+        supplier_response = client.post(
+            "/suppliers", json={"name": "Fornecedor de leitura"}, headers=admin_headers
+        )
+        supplier_id = supplier_response.json()["id"]
+        operator_headers = get_operator_headers(client)
+
+        for headers in (admin_headers, operator_headers):
+            responses = (
+                client.get("/products", headers=headers),
+                client.get(f"/products/{product['id']}", headers=headers),
+                client.get("/movements", headers=headers),
+                client.get("/dashboard/summary", headers=headers),
+                client.get("/products/low-stock", headers=headers),
+                client.get("/suppliers", headers=headers),
+                client.get(f"/suppliers/{supplier_id}", headers=headers),
+            )
+            assert all(response.status_code == 200 for response in responses)
 
 
 def test_create_user_hashes_password_and_hides_sensitive_fields():
@@ -672,7 +700,7 @@ def test_product_not_found_errors_are_standardized():
 
     with TestClient(app) as client:
         headers = get_auth_headers(client)
-        get_response = client.get("/products/999")
+        get_response = client.get("/products/999", headers=headers)
         update_response = client.put("/products/999", json=product_data, headers=headers)
         delete_response = client.delete("/products/999", headers=headers)
 
@@ -728,7 +756,7 @@ def test_error_responses_use_a_safe_and_consistent_envelope():
         forbidden_response = client.post(
             "/products", json=product_data, headers=operator_headers
         )
-        not_found_response = client.get("/products/999")
+        not_found_response = client.get("/products/999", headers=admin_headers)
         first_user_response = client.post(
             "/users",
             json={"username": "duplicado", "password": "uma-senha-segura"},
@@ -740,7 +768,7 @@ def test_error_responses_use_a_safe_and_consistent_envelope():
             headers=admin_headers,
         )
         validation_response = client.get(
-            "/products", params={"min_price": 20, "max_price": 10}
+            "/products", params={"min_price": 20, "max_price": 10}, headers=admin_headers
         )
         invalid_movement_response = client.post(
             "/products/999/movements/entry",
@@ -911,7 +939,7 @@ def test_list_products_uses_default_pagination():
         for index in range(21):
             create_product(client, quantity=index, name=f"Produto {index}")
 
-        response = client.get("/products")
+        response = client.get("/products", headers=get_auth_headers(client))
 
     assert response.status_code == 200
     data = response.json()
@@ -927,7 +955,9 @@ def test_list_products_supports_custom_page_and_page_size():
         for index in range(5):
             create_product(client, quantity=index, name=f"Produto {index}")
 
-        response = client.get("/products", params={"page": 2, "page_size": 2})
+        response = client.get(
+            "/products", params={"page": 2, "page_size": 2}, headers=get_auth_headers(client)
+        )
 
     assert response.status_code == 200
     data = response.json()
@@ -945,7 +975,9 @@ def test_list_products_searches_name_case_insensitively():
         )
         create_product(client, quantity=5, name="Mouse")
 
-        response = client.get("/products", params={"search": "MECANICO"})
+        response = client.get(
+            "/products", params={"search": "MECANICO"}, headers=get_auth_headers(client)
+        )
 
     assert response.status_code == 200
     data = response.json()
@@ -959,11 +991,12 @@ def test_list_products_searches_names_without_accents():
         sugar = create_product(client, quantity=5, name="Açúcar mascavo")
         soap = create_product(client, quantity=5, name="Sabão em pó")
 
-        coffee_response = client.get("/products", params={"search": "cafe"})
-        sugar_response = client.get("/products", params={"search": "acucar"})
-        soap_response = client.get("/products", params={"search": "sabao"})
-        upper_case_response = client.get("/products", params={"search": "CAFE"})
-        partial_response = client.get("/products", params={"search": "acu"})
+        headers = get_auth_headers(client)
+        coffee_response = client.get("/products", params={"search": "cafe"}, headers=headers)
+        sugar_response = client.get("/products", params={"search": "acucar"}, headers=headers)
+        soap_response = client.get("/products", params={"search": "sabao"}, headers=headers)
+        upper_case_response = client.get("/products", params={"search": "CAFE"}, headers=headers)
+        partial_response = client.get("/products", params={"search": "acu"}, headers=headers)
 
     assert [product["id"] for product in coffee_response.json()["items"]] == [
         coffee["id"]
@@ -987,7 +1020,7 @@ def test_list_products_combines_accent_insensitive_search_with_pagination():
         create_product(client, quantity=5, name="Café terceiro")
 
         response = client.get(
-            "/products", params={"search": "cafe", "page": 2, "page_size": 1}
+            "/products", params={"search": "cafe", "page": 2, "page_size": 1}, headers=get_auth_headers(client)
         )
 
     assert response.status_code == 200
@@ -1005,7 +1038,7 @@ def test_list_products_combines_accent_insensitive_search_with_low_stock():
         create_product(client, quantity=3, minimum_quantity=2, name="Café normal")
 
         response = client.get(
-            "/products", params={"search": "cafe", "low_stock": True}
+            "/products", params={"search": "cafe", "low_stock": True}, headers=get_auth_headers(client)
         )
 
     assert response.status_code == 200
@@ -1026,11 +1059,13 @@ def test_list_products_filters_low_stock_and_combines_filters_with_pagination():
             client, quantity=3, minimum_quantity=2, name="Estoque normal"
         )
 
-        low_stock_response = client.get("/products", params={"low_stock": True})
-        normal_stock_response = client.get("/products", params={"low_stock": False})
+        headers = get_auth_headers(client)
+        low_stock_response = client.get("/products", params={"low_stock": True}, headers=headers)
+        normal_stock_response = client.get("/products", params={"low_stock": False}, headers=headers)
         combined_response = client.get(
             "/products",
             params={"search": "baixo", "low_stock": True, "page": 2, "page_size": 1},
+            headers=headers,
         )
 
     assert low_stock_response.status_code == 200
@@ -1053,8 +1088,11 @@ def test_list_products_filters_low_stock_and_combines_filters_with_pagination():
 
 def test_list_products_rejects_invalid_pagination_values():
     with TestClient(app) as client:
-        oversized_response = client.get("/products", params={"page_size": 101})
-        invalid_page_response = client.get("/products", params={"page": 0})
+        headers = get_auth_headers(client)
+        oversized_response = client.get(
+            "/products", params={"page_size": 101}, headers=headers
+        )
+        invalid_page_response = client.get("/products", params={"page": 0}, headers=headers)
 
     assert oversized_response.status_code == 422
     assert invalid_page_response.status_code == 422
@@ -1088,10 +1126,14 @@ def test_list_products_filters_by_category_supplier_price_and_combination():
         )
         create_product(client, quantity=1, category="Papelaria", price=25.0)
 
-        category_response = client.get("/products", params={"category": "Eletrônicos"})
-        supplier_response = client.get("/products", params={"supplier_id": supplier_id})
+        category_response = client.get(
+            "/products", params={"category": "Eletrônicos"}, headers=headers
+        )
+        supplier_response = client.get(
+            "/products", params={"supplier_id": supplier_id}, headers=headers
+        )
         price_response = client.get(
-            "/products", params={"min_price": 24, "max_price": 26}
+            "/products", params={"min_price": 24, "max_price": 26}, headers=headers
         )
         combined_response = client.get(
             "/products",
@@ -1103,6 +1145,7 @@ def test_list_products_filters_by_category_supplier_price_and_combination():
                 "min_price": 20,
                 "max_price": 30,
             },
+            headers=headers,
         )
 
     assert [item["id"] for item in category_response.json()["items"]] == [
@@ -1118,13 +1161,18 @@ def test_list_products_filters_by_category_supplier_price_and_combination():
 
 def test_list_products_validates_price_range_and_supplier_filter():
     with TestClient(app) as client:
-        negative_min_response = client.get("/products", params={"min_price": -1})
-        negative_max_response = client.get("/products", params={"max_price": -1})
+        headers = get_auth_headers(client)
+        negative_min_response = client.get(
+            "/products", params={"min_price": -1}, headers=headers
+        )
+        negative_max_response = client.get(
+            "/products", params={"max_price": -1}, headers=headers
+        )
         invalid_range_response = client.get(
-            "/products", params={"min_price": 20, "max_price": 10}
+            "/products", params={"min_price": 20, "max_price": 10}, headers=headers
         )
         missing_supplier_response = client.get(
-            "/products", params={"supplier_id": 999}
+            "/products", params={"supplier_id": 999}, headers=headers
         )
 
     assert negative_min_response.status_code == 422
@@ -1144,17 +1192,23 @@ def test_list_products_sorts_with_safe_whitelist_and_keeps_sku_search():
         )
 
         ascending_response = client.get(
-            "/products", params={"sort_by": "price", "sort_order": "asc"}
+            "/products",
+            params={"sort_by": "price", "sort_order": "asc"},
+            headers=get_auth_headers(client),
         )
         descending_response = client.get(
-            "/products", params={"sort_by": "price", "sort_order": "desc"}
+            "/products",
+            params={"sort_by": "price", "sort_order": "desc"},
+            headers=get_auth_headers(client),
         )
-        sku_response = client.get("/products", params={"search": "alfa"})
+        sku_response = client.get(
+            "/products", params={"search": "alfa"}, headers=get_auth_headers(client)
+        )
         invalid_sort_response = client.get(
-            "/products", params={"sort_by": "supplier_id"}
+            "/products", params={"sort_by": "supplier_id"}, headers=get_auth_headers(client)
         )
         invalid_order_response = client.get(
-            "/products", params={"sort_order": "sideways"}
+            "/products", params={"sort_order": "sideways"}, headers=get_auth_headers(client)
         )
 
     assert [item["id"] for item in ascending_response.json()["items"]] == [
@@ -1183,7 +1237,9 @@ def test_create_stock_entry_updates_product_quantity():
         assert response.status_code == 201
         assert response.json()["movement_type"] == "entry"
 
-        product_response = client.get(f"/products/{product['id']}")
+        product_response = client.get(
+            f"/products/{product['id']}", headers=get_auth_headers(client)
+        )
 
     assert product_response.status_code == 200
     assert product_response.json()["quantity"] == 15
@@ -1202,7 +1258,9 @@ def test_create_stock_exit_updates_product_quantity():
         assert response.status_code == 201
         assert response.json()["movement_type"] == "exit"
 
-        product_response = client.get(f"/products/{product['id']}")
+        product_response = client.get(
+            f"/products/{product['id']}", headers=get_auth_headers(client)
+        )
 
     assert product_response.status_code == 200
     assert product_response.json()["quantity"] == 6
@@ -1224,7 +1282,9 @@ def test_stock_exit_larger_than_available_stock_is_rejected():
         "message": "Estoque insuficiente",
     }
 
-    product_response = client.get(f"/products/{product['id']}")
+    product_response = client.get(
+        f"/products/{product['id']}", headers=get_auth_headers(client)
+    )
 
     assert product_response.status_code == 200
     assert product_response.json()["quantity"] == 3
@@ -1280,12 +1340,12 @@ def test_product_with_movements_is_deactivated_and_history_is_preserved():
             headers=headers,
         )
         delete_response = client.delete(f"/products/{product['id']}", headers=headers)
-        product_response = client.get(f"/products/{product['id']}")
-        list_response = client.get("/products")
+        product_response = client.get(f"/products/{product['id']}", headers=headers)
+        list_response = client.get("/products", headers=headers)
         include_inactive_response = client.get(
-            "/products", params={"include_inactive": True}
+            "/products", params={"include_inactive": True}, headers=headers
         )
-        movements_response = client.get("/movements")
+        movements_response = client.get("/movements", headers=headers)
 
     assert movement_response.status_code == 201
     assert delete_response.status_code == 200
@@ -1306,7 +1366,9 @@ def test_product_without_movements_is_not_physically_deleted():
         delete_response = client.delete(
             f"/products/{product['id']}", headers=get_auth_headers(client)
         )
-        product_response = client.get(f"/products/{product['id']}")
+        product_response = client.get(
+            f"/products/{product['id']}", headers=get_auth_headers(client)
+        )
 
     assert delete_response.status_code == 200
     assert product_response.status_code == 200
@@ -1371,8 +1433,8 @@ def test_inactive_products_are_ignored_by_low_stock_and_dashboard():
         deactivate_response = client.delete(
             f"/products/{product['id']}", headers=get_auth_headers(client)
         )
-        low_stock_response = client.get("/products/low-stock")
-        dashboard_response = client.get("/dashboard/summary")
+        low_stock_response = client.get("/products/low-stock", headers=get_auth_headers(client))
+        dashboard_response = client.get("/dashboard/summary", headers=get_auth_headers(client))
 
     assert product["is_active"] is True
     assert deactivate_response.status_code == 200
@@ -1692,7 +1754,7 @@ def test_list_stock_movements_returns_most_recent_first():
             json={"movement_type": "exit", "quantity": 4},
             headers=get_auth_headers(client),
         )
-        movements_response = client.get("/movements")
+        movements_response = client.get("/movements", headers=get_auth_headers(client))
 
     assert entry_response.status_code == 201
     assert exit_response.status_code == 201
@@ -1744,7 +1806,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
             },
             headers=get_auth_headers(client),
         )
-        response = client.get("/products/low-stock")
+        response = client.get("/products/low-stock", headers=get_auth_headers(client))
 
     assert above_minimum.status_code == 200
     assert equal_to_minimum.status_code == 200
@@ -1761,7 +1823,7 @@ def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
 
 def test_dashboard_summary_returns_zeros_for_empty_database():
     with TestClient(app) as client:
-        response = client.get("/dashboard/summary")
+        response = client.get("/dashboard/summary", headers=get_auth_headers(client))
 
     assert response.status_code == 200
     assert response.json() == {
@@ -1807,7 +1869,7 @@ def test_dashboard_summary_calculates_inventory_indicators():
             )
             assert create_response.status_code == 200
 
-        response = client.get("/dashboard/summary")
+        response = client.get("/dashboard/summary", headers=get_auth_headers(client))
 
     assert response.status_code == 200
     assert response.json() == {
@@ -1832,7 +1894,9 @@ def test_dashboard_summary_returns_five_most_recent_movements():
             assert response.status_code == 201
             movement_responses.append(response.json())
 
-        summary_response = client.get("/dashboard/summary")
+        summary_response = client.get(
+            "/dashboard/summary", headers=get_auth_headers(client)
+        )
 
     assert summary_response.status_code == 200
     recent_movements = summary_response.json()["recent_movements"]
@@ -2098,7 +2162,7 @@ def test_cannot_delete_supplier_associated_with_a_product():
         )
         delete_response = client.delete(f"/suppliers/{supplier_id}", headers=admin_headers)
         product_after_delete_attempt = client.get(
-            f"/products/{product_response.json()['id']}"
+            f"/products/{product_response.json()['id']}", headers=admin_headers
         )
 
     assert delete_response.status_code == 409
@@ -2189,7 +2253,9 @@ def test_sku_integrity_error_rolls_back_failed_product_create_and_update(monkeyp
             },
             headers=admin_headers,
         )
-        second_product_response = client.get(f"/products/{second_product['id']}")
+        second_product_response = client.get(
+            f"/products/{second_product['id']}", headers=admin_headers
+        )
 
     db = TestingSessionLocal()
     try:
@@ -2233,7 +2299,9 @@ def test_product_sku_can_be_updated_and_searched():
             json={**update_payload, "sku": "PROD-NOVO"},
             headers=admin_headers,
         )
-        search_response = client.get("/products", params={"search": "novo"})
+        search_response = client.get(
+            "/products", params={"search": "novo"}, headers=admin_headers
+        )
 
     assert update_response.status_code == 200
     assert update_response.json()["sku"] == "PROD-NOVO"

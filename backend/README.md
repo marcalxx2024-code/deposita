@@ -119,6 +119,18 @@ A documentação interativa Swagger estará em [http://127.0.0.1:8000/docs](http
 - `OPERATOR`: pode registrar entradas e saídas de estoque, sem administrar
   produtos ou fornecedores.
 
+As leituras operacionais exigem autenticação para evitar expor catálogo,
+fornecedores, níveis de estoque, dashboard e histórico de movimentações. ADMIN
+e OPERATOR podem consultar esses dados; a diferença entre os papéis se aplica
+às operações administrativas e de escrita.
+
+- Públicos: `GET /health`, `POST /auth/login` e documentação automática.
+- Autenticados: `GET /auth/me`, produtos, low-stock, dashboard, movimentações
+  e fornecedores.
+- OPERATOR+: entradas e saídas de estoque.
+- ADMIN: usuários, auditoria, administração de produtos e fornecedores, além
+  de inativação e reativação de produtos.
+
 `POST /users` exige ADMIN e sempre cria uma conta `OPERATOR`. A API não cria
 ADMINs: o primeiro é criado pelo comando de bootstrap para evitar auto-registro
 com permissão operacional ou escalada de privilégio por payload.
