@@ -17,6 +17,8 @@ from app.errors import (
     invalid_authentication_error,
     invalid_credentials_error,
     product_not_found_error,
+    supplier_in_use_error,
+    supplier_not_found_error,
     username_already_exists_error,
 )
 from app.security import (
@@ -100,6 +102,13 @@ def filter_by_low_stock(query, low_stock: bool):
 
 def low_stock_products_query(db: Session):
     return filter_by_low_stock(db.query(models.Product), low_stock=True)
+
+
+def get_supplier_or_error(supplier_id: int, db: Session) -> models.Supplier:
+    supplier = db.get(models.Supplier, supplier_id)
+    if supplier is None:
+        raise supplier_not_found_error()
+    return supplier
 
 
 @app.get("/health")
@@ -197,6 +206,9 @@ def create_product(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
+    if product.supplier_id is not None:
+        get_supplier_or_error(product.supplier_id, db)
+
     db_product = models.Product(**product.model_dump())
     db.add(db_product)
     db.flush()
@@ -305,6 +317,10 @@ def update_product(
     product.category = product_data.category
     product.minimum_quantity = product_data.minimum_quantity
     product.price = product_data.price
+    if "supplier_id" in product_data.model_fields_set:
+        if product_data.supplier_id is not None:
+            get_supplier_or_error(product_data.supplier_id, db)
+        product.supplier_id = product_data.supplier_id
 
     db.add(
         models.AuditLog(
@@ -466,3 +482,88 @@ def list_audit_logs(
         .order_by(models.AuditLog.created_at.desc(), models.AuditLog.id.desc())
         .all()
     )
+
+
+@app.post("/suppliers", response_model=schemas.SupplierResponse, status_code=201)
+def create_supplier(
+    supplier: schemas.SupplierCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    db_supplier = models.Supplier(**supplier.model_dump())
+    db.add(db_supplier)
+    db.flush()
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="supplier_created",
+            resource_type="supplier",
+            resource_id=db_supplier.id,
+        )
+    )
+    db.commit()
+    db.refresh(db_supplier)
+    return db_supplier
+
+
+@app.get("/suppliers", response_model=list[schemas.SupplierResponse])
+def list_suppliers(
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
+    return db.query(models.Supplier).order_by(models.Supplier.id.asc()).all()
+
+
+@app.get("/suppliers/{supplier_id}", response_model=schemas.SupplierResponse)
+def get_supplier(
+    supplier_id: int,
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(get_current_user),
+):
+    return get_supplier_or_error(supplier_id, db)
+
+
+@app.put("/suppliers/{supplier_id}", response_model=schemas.SupplierResponse)
+def update_supplier(
+    supplier_id: int,
+    supplier_data: schemas.SupplierUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    supplier = get_supplier_or_error(supplier_id, db)
+    for field, value in supplier_data.model_dump().items():
+        setattr(supplier, field, value)
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="supplier_updated",
+            resource_type="supplier",
+            resource_id=supplier.id,
+        )
+    )
+    db.commit()
+    db.refresh(supplier)
+    return supplier
+
+
+@app.delete("/suppliers/{supplier_id}", status_code=200)
+def delete_supplier(
+    supplier_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    supplier = get_supplier_or_error(supplier_id, db)
+    if db.query(models.Product).filter(models.Product.supplier_id == supplier.id).first():
+        raise supplier_in_use_error()
+
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="supplier_deleted",
+            resource_type="supplier",
+            resource_id=supplier.id,
+        )
+    )
+    db.delete(supplier)
+    db.commit()
+    return {"message": "Fornecedor excluÃ­do com sucesso"}

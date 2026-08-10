@@ -1068,3 +1068,160 @@ def test_admin_can_list_audit_logs_without_sensitive_data():
     serialized_response = json.dumps(response.json())
     for sensitive_field in ("password", "token", "secret", "jwt"):
         assert sensitive_field not in serialized_response.lower()
+
+
+def test_admin_can_create_update_list_and_delete_suppliers_with_audit_logs():
+    supplier_data = {
+        "name": "Fornecedor de teste",
+        "contact_name": "Contato",
+        "phone": "11999999999",
+        "email": "contato@fornecedor.test",
+    }
+    updated_supplier_data = {
+        **supplier_data,
+        "name": "Fornecedor atualizado",
+        "phone": "11888888888",
+    }
+
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        create_response = client.post(
+            "/suppliers", json=supplier_data, headers=admin_headers
+        )
+        supplier_id = create_response.json()["id"]
+        list_response = client.get("/suppliers", headers=admin_headers)
+        detail_response = client.get(f"/suppliers/{supplier_id}", headers=admin_headers)
+        update_response = client.put(
+            f"/suppliers/{supplier_id}",
+            json=updated_supplier_data,
+            headers=admin_headers,
+        )
+        delete_response = client.delete(f"/suppliers/{supplier_id}", headers=admin_headers)
+        audit_response = client.get("/audit-logs", headers=admin_headers)
+
+    assert create_response.status_code == 201
+    assert list_response.status_code == 200
+    assert detail_response.status_code == 200
+    assert update_response.status_code == 200
+    assert update_response.json()["name"] == "Fornecedor atualizado"
+    assert delete_response.status_code == 200
+    assert [supplier["id"] for supplier in list_response.json()] == [supplier_id]
+    assert [audit_log["action"] for audit_log in audit_response.json()] == [
+        "supplier_deleted",
+        "supplier_updated",
+        "supplier_created",
+    ]
+    assert all(audit_log["resource_type"] == "supplier" for audit_log in audit_response.json())
+    assert all(audit_log["resource_id"] == supplier_id for audit_log in audit_response.json())
+
+
+def test_operator_cannot_create_supplier():
+    with TestClient(app) as client:
+        response = client.post(
+            "/suppliers",
+            json={"name": "Fornecedor de teste"},
+            headers=get_operator_headers(client),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_supplier_not_found_returns_404():
+    supplier_data = {"name": "Fornecedor de teste"}
+
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        responses = (
+            client.get("/suppliers/999", headers=admin_headers),
+            client.put("/suppliers/999", json=supplier_data, headers=admin_headers),
+            client.delete("/suppliers/999", headers=admin_headers),
+        )
+
+    for response in responses:
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "SUPPLIER_NOT_FOUND"
+
+
+def test_products_can_optionally_reference_a_supplier_and_validate_supplier_id():
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        supplier_response = client.post(
+            "/suppliers", json={"name": "Fornecedor de teste"}, headers=admin_headers
+        )
+        supplier_id = supplier_response.json()["id"]
+        product_with_supplier = client.post(
+            "/products",
+            json={
+                "name": "Produto com fornecedor",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+                "supplier_id": supplier_id,
+            },
+            headers=admin_headers,
+        )
+        product_without_supplier = create_product(client, quantity=10)
+        invalid_supplier_response = client.post(
+            "/products",
+            json={
+                "name": "Produto invalido",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+                "supplier_id": 999,
+            },
+            headers=admin_headers,
+        )
+        invalid_update_response = client.put(
+            f"/products/{product_without_supplier['id']}",
+            json={
+                "name": "Produto atualizado",
+                "category": "Teste",
+                "minimum_quantity": 2,
+                "price": 10.5,
+                "supplier_id": 999,
+            },
+            headers=admin_headers,
+        )
+
+    assert supplier_response.status_code == 201
+    assert product_with_supplier.status_code == 200
+    assert product_with_supplier.json()["supplier_id"] == supplier_id
+    assert product_without_supplier["supplier_id"] is None
+    assert invalid_supplier_response.status_code == 404
+    assert invalid_supplier_response.json()["error"]["code"] == "SUPPLIER_NOT_FOUND"
+    assert invalid_update_response.status_code == 404
+    assert invalid_update_response.json()["error"]["code"] == "SUPPLIER_NOT_FOUND"
+
+
+def test_cannot_delete_supplier_associated_with_a_product():
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        supplier_response = client.post(
+            "/suppliers", json={"name": "Fornecedor de teste"}, headers=admin_headers
+        )
+        supplier_id = supplier_response.json()["id"]
+        product_response = client.post(
+            "/products",
+            json={
+                "name": "Produto associado",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+                "supplier_id": supplier_id,
+            },
+            headers=admin_headers,
+        )
+        delete_response = client.delete(f"/suppliers/{supplier_id}", headers=admin_headers)
+        product_after_delete_attempt = client.get(
+            f"/products/{product_response.json()['id']}"
+        )
+
+    assert delete_response.status_code == 409
+    assert delete_response.json()["error"]["code"] == "SUPPLIER_IN_USE"
+    assert product_after_delete_attempt.status_code == 200
+    assert product_after_delete_attempt.json()["supplier_id"] == supplier_id

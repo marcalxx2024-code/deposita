@@ -22,7 +22,7 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
-    pass
+    supplier_id: int | None = None
 
 
 class ProductUpdate(BaseModel):
@@ -30,12 +30,14 @@ class ProductUpdate(BaseModel):
     category: str = Field(min_length=2, max_length=50)
     minimum_quantity: int = Field(ge=0)
     price: float = Field(ge=0)
+    supplier_id: int | None = None
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ProductResponse(ProductBase):
     id: int
+    supplier_id: int | None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -113,6 +115,30 @@ class AuditLogResponse(BaseModel):
     action: str
     resource_type: str
     resource_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SupplierBase(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    contact_name: str | None = Field(default=None, max_length=100)
+    phone: str | None = Field(default=None, max_length=30)
+    email: str | None = Field(default=None, max_length=255)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SupplierCreate(SupplierBase):
+    pass
+
+
+class SupplierUpdate(SupplierBase):
+    pass
+
+
+class SupplierResponse(SupplierBase):
+    id: int
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

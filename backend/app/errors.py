@@ -20,6 +20,22 @@ def product_not_found_error() -> APIError:
     )
 
 
+def supplier_not_found_error() -> APIError:
+    return APIError(
+        status_code=404,
+        code="SUPPLIER_NOT_FOUND",
+        message="Fornecedor nÃ£o encontrado",
+    )
+
+
+def supplier_in_use_error() -> APIError:
+    return APIError(
+        status_code=409,
+        code="SUPPLIER_IN_USE",
+        message="Fornecedor possui produtos associados",
+    )
+
+
 def username_already_exists_error() -> APIError:
     return APIError(
         status_code=409,

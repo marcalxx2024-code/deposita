@@ -33,6 +33,19 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    contact_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    created_at = Column(UTCDateTime(), nullable=False, default=utc_now)
+
+    products = relationship("Product", back_populates="supplier")
+
+
 class Product(Base):
     __tablename__ = "products"
 
@@ -42,6 +55,9 @@ class Product(Base):
     quantity = Column(Integer, nullable=False, default=0)
     minimum_quantity = Column(Integer, nullable=False, default=0)
     price = Column(Float, nullable=False, default=0)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True, index=True)
+
+    supplier = relationship("Supplier", back_populates="products")
 
     movements = relationship(
         "StockMovement",
