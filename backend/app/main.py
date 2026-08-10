@@ -137,6 +137,29 @@ def validate_sku_is_available(
         raise sku_already_exists_error()
 
 
+def is_sku_unique_violation(error: IntegrityError) -> bool:
+    """Identify only the known unique constraint for a product SKU.
+
+    The text is database-driver specific, so this intentionally recognizes the
+    SQLite message used by the current deployment and the stable index name for
+    future database drivers. Other integrity failures must retain their normal
+    error handling instead of being misreported as SKU conflicts.
+    """
+    error_message = str(error.orig).lower()
+    return (
+        "unique constraint failed: products.sku" in error_message
+        or "ix_products_sku" in error_message
+    )
+
+
+def rollback_and_raise_product_integrity_error(db: Session, error: IntegrityError) -> None:
+    """Rollback the whole product transaction and translate SKU conflicts."""
+    db.rollback()
+    if is_sku_unique_violation(error):
+        raise sku_already_exists_error() from error
+    raise error
+
+
 @app.get("/health")
 def health_check():
     return {"status": "online"}
@@ -243,16 +266,19 @@ def create_product(
 
     db_product = models.Product(**product.model_dump())
     db.add(db_product)
-    db.flush()
-    db.add(
-        models.AuditLog(
-            user_id=current_user.id,
-            action="product_created",
-            resource_type="product",
-            resource_id=db_product.id,
+    try:
+        db.flush()
+        db.add(
+            models.AuditLog(
+                user_id=current_user.id,
+                action="product_created",
+                resource_type="product",
+                resource_id=db_product.id,
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except IntegrityError as error:
+        rollback_and_raise_product_integrity_error(db, error)
     db.refresh(db_product)
     return db_product
 
@@ -382,27 +408,30 @@ def update_product(
     if product is None:
         raise product_not_found_error()
 
-    product.name = product_data.name
-    product.category = product_data.category
-    product.minimum_quantity = product_data.minimum_quantity
-    product.price = product_data.price
-    if "sku" in product_data.model_fields_set:
-        validate_sku_is_available(product_data.sku, db, product.id)
-        product.sku = product_data.sku
-    if "supplier_id" in product_data.model_fields_set:
-        if product_data.supplier_id is not None:
-            get_supplier_or_error(product_data.supplier_id, db)
-        product.supplier_id = product_data.supplier_id
+    try:
+        product.name = product_data.name
+        product.category = product_data.category
+        product.minimum_quantity = product_data.minimum_quantity
+        product.price = product_data.price
+        if "sku" in product_data.model_fields_set:
+            validate_sku_is_available(product_data.sku, db, product.id)
+            product.sku = product_data.sku
+        if "supplier_id" in product_data.model_fields_set:
+            if product_data.supplier_id is not None:
+                get_supplier_or_error(product_data.supplier_id, db)
+            product.supplier_id = product_data.supplier_id
 
-    db.add(
-        models.AuditLog(
-            user_id=current_user.id,
-            action="product_updated",
-            resource_type="product",
-            resource_id=product.id,
+        db.add(
+            models.AuditLog(
+                user_id=current_user.id,
+                action="product_updated",
+                resource_type="product",
+                resource_id=product.id,
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except IntegrityError as error:
+        rollback_and_raise_product_integrity_error(db, error)
     db.refresh(product)
     return product
 

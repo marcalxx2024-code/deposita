@@ -16,6 +16,7 @@ from app.config import parse_cors_origins
 from app.bootstrap_admin import BootstrapAdminError, bootstrap_admin
 from app import models, schemas
 from app.errors import APIError
+import app.main as main_module
 from app.main import app, create_stock_entry, create_stock_exit
 from app.models import User, UserRole
 from app.security import create_access_token, hash_password, verify_password
@@ -1338,6 +1339,91 @@ def create_concurrent_stock_database(tmp_path, quantity: int):
         db.close()
 
 
+def test_concurrent_product_creation_with_same_sku_returns_conflict(tmp_path, monkeypatch):
+    database_path = tmp_path / "concurrent_sku.db"
+    concurrent_engine = create_engine(
+        f"sqlite:///{database_path.as_posix()}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    ConcurrentSession = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=concurrent_engine,
+    )
+    Base.metadata.create_all(bind=concurrent_engine)
+
+    db = ConcurrentSession()
+    try:
+        admin = User(
+            username="concurrent-sku-admin",
+            password_hash=hash_password("uma-senha-segura"),
+            role=UserRole.ADMIN.value,
+        )
+        db.add(admin)
+        db.commit()
+        admin_id = admin.id
+    finally:
+        db.close()
+
+    original_validate_sku = main_module.validate_sku_is_available
+    precheck_finished = Barrier(2)
+
+    def synchronized_validate_sku(sku, db, product_id=None):
+        original_validate_sku(sku, db, product_id)
+        precheck_finished.wait()
+
+    monkeypatch.setattr(
+        main_module, "validate_sku_is_available", synchronized_validate_sku
+    )
+
+    def create_with_same_sku(index: int) -> str:
+        db = ConcurrentSession()
+        try:
+            admin = db.get(User, admin_id)
+            try:
+                main_module.create_product(
+                    product=schemas.ProductCreate(
+                        name=f"Produto concorrente {index}",
+                        category="Teste",
+                        quantity=1,
+                        minimum_quantity=0,
+                        price=10,
+                        sku="RACE-SKU-001",
+                    ),
+                    db=db,
+                    current_user=admin,
+                )
+                return "success"
+            except APIError as error:
+                return error.code
+        finally:
+            db.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(create_with_same_sku, range(2)))
+
+        db = ConcurrentSession()
+        try:
+            products = (
+                db.query(models.Product)
+                .filter(models.Product.sku == "RACE-SKU-001")
+                .all()
+            )
+            audits = db.query(models.AuditLog).filter(
+                models.AuditLog.action == "product_created"
+            ).all()
+        finally:
+            db.close()
+    finally:
+        concurrent_engine.dispose()
+
+    assert sorted(results) == ["SKU_ALREADY_EXISTS", "success"]
+    assert len(products) == 1
+    assert len(audits) == 1
+    assert audits[0].resource_id == products[0].id
+
+
 def test_concurrent_stock_exits_keep_balance_and_movements_consistent(tmp_path):
     concurrent_engine, ConcurrentSession, admin_id, product_id = (
         create_concurrent_stock_database(tmp_path, quantity=10)
@@ -1987,6 +2073,63 @@ def test_product_creation_rejects_duplicate_sku():
     assert first_product["sku"] == "BEB-0001"
     assert duplicate_response.status_code == 409
     assert duplicate_response.json()["error"]["code"] == "SKU_ALREADY_EXISTS"
+
+
+def test_sku_integrity_error_rolls_back_failed_product_create_and_update(monkeypatch):
+    monkeypatch.setattr(
+        main_module, "validate_sku_is_available", lambda *_args, **_kwargs: None
+    )
+
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        first_product = create_product(client, quantity=10, sku="SKU-PRIMEIRO")
+        second_product = create_product(client, quantity=10, sku="SKU-SEGUNDO")
+
+        duplicate_create_response = client.post(
+            "/products",
+            json={
+                "name": "Produto com SKU repetido",
+                "category": "Teste",
+                "quantity": 10,
+                "minimum_quantity": 2,
+                "price": 10.5,
+                "sku": first_product["sku"],
+            },
+            headers=admin_headers,
+        )
+        duplicate_update_response = client.put(
+            f"/products/{second_product['id']}",
+            json={
+                "name": "Produto atualizado",
+                "category": "Teste",
+                "minimum_quantity": 2,
+                "price": 10.5,
+                "sku": first_product["sku"],
+            },
+            headers=admin_headers,
+        )
+        second_product_response = client.get(f"/products/{second_product['id']}")
+
+    db = TestingSessionLocal()
+    try:
+        products = db.query(models.Product).all()
+        audits = db.query(models.AuditLog).filter(
+            models.AuditLog.action == "product_created"
+        ).all()
+        update_audits = db.query(models.AuditLog).filter(
+            models.AuditLog.action == "product_updated"
+        ).all()
+    finally:
+        db.close()
+
+    assert duplicate_create_response.status_code == 409
+    assert duplicate_create_response.json()["error"]["code"] == "SKU_ALREADY_EXISTS"
+    assert duplicate_update_response.status_code == 409
+    assert duplicate_update_response.json()["error"]["code"] == "SKU_ALREADY_EXISTS"
+    assert second_product_response.json()["sku"] == "SKU-SEGUNDO"
+    assert len(products) == 2
+    assert len(audits) == 2
+    assert update_audits == []
 
 
 def test_product_sku_can_be_updated_and_searched():
