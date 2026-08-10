@@ -3,3 +3,4 @@ sqlalchemy
 pwdlib[argon2]
 PyJWT
 uvicorn
+alembic
