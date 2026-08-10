@@ -95,16 +95,20 @@ def create_product(
     name: str = "Produto de teste",
     minimum_quantity: int = 2,
     sku: str | None = None,
+    category: str = "Teste",
+    price: float = 10.5,
+    supplier_id: int | None = None,
 ) -> dict:
     response = client.post(
         "/products",
         json={
             "name": name,
-            "category": "Teste",
+            "category": category,
             "quantity": quantity,
             "minimum_quantity": minimum_quantity,
-            "price": 10.5,
+            "price": price,
             "sku": sku or f"TEST-{next(product_sku_counter)}",
+            "supplier_id": supplier_id,
         },
         headers=get_auth_headers(client),
     )
@@ -727,6 +731,114 @@ def test_list_products_rejects_invalid_pagination_values():
     assert invalid_page_response.status_code == 422
     assert oversized_response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert invalid_page_response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_list_products_filters_by_category_supplier_price_and_combination():
+    with TestClient(app) as client:
+        headers = get_auth_headers(client)
+        supplier_response = client.post(
+            "/suppliers", json={"name": "Fornecedor A"}, headers=headers
+        )
+        assert supplier_response.status_code == 201
+        supplier_id = supplier_response.json()["id"]
+        matching_product = create_product(
+            client,
+            quantity=1,
+            minimum_quantity=2,
+            name="Cabo premium",
+            category="Eletrônicos",
+            price=25.0,
+            supplier_id=supplier_id,
+        )
+        second_supplier_product = create_product(
+            client,
+            quantity=4,
+            category="Eletrônicos",
+            price=30.0,
+            supplier_id=supplier_id,
+        )
+        create_product(client, quantity=1, category="Papelaria", price=25.0)
+
+        category_response = client.get("/products", params={"category": "Eletrônicos"})
+        supplier_response = client.get("/products", params={"supplier_id": supplier_id})
+        price_response = client.get(
+            "/products", params={"min_price": 24, "max_price": 26}
+        )
+        combined_response = client.get(
+            "/products",
+            params={
+                "search": "cabo",
+                "category": "Eletrônicos",
+                "supplier_id": supplier_id,
+                "low_stock": True,
+                "min_price": 20,
+                "max_price": 30,
+            },
+        )
+
+    assert [item["id"] for item in category_response.json()["items"]] == [
+        matching_product["id"],
+        second_supplier_product["id"],
+    ]
+    assert supplier_response.json()["total"] == 2
+    assert price_response.json()["total"] == 2
+    assert [item["id"] for item in combined_response.json()["items"]] == [
+        matching_product["id"]
+    ]
+
+
+def test_list_products_validates_price_range_and_supplier_filter():
+    with TestClient(app) as client:
+        negative_min_response = client.get("/products", params={"min_price": -1})
+        negative_max_response = client.get("/products", params={"max_price": -1})
+        invalid_range_response = client.get(
+            "/products", params={"min_price": 20, "max_price": 10}
+        )
+        missing_supplier_response = client.get(
+            "/products", params={"supplier_id": 999}
+        )
+
+    assert negative_min_response.status_code == 422
+    assert negative_max_response.status_code == 422
+    assert invalid_range_response.status_code == 422
+    assert missing_supplier_response.status_code == 404
+    assert missing_supplier_response.json()["error"]["code"] == "SUPPLIER_NOT_FOUND"
+
+
+def test_list_products_sorts_with_safe_whitelist_and_keeps_sku_search():
+    with TestClient(app) as client:
+        expensive_product = create_product(
+            client, quantity=8, name="Zulu", price=30, sku="SKU-ZULU"
+        )
+        cheap_product = create_product(
+            client, quantity=2, name="Alfa", price=10, sku="SKU-ALFA"
+        )
+
+        ascending_response = client.get(
+            "/products", params={"sort_by": "price", "sort_order": "asc"}
+        )
+        descending_response = client.get(
+            "/products", params={"sort_by": "price", "sort_order": "desc"}
+        )
+        sku_response = client.get("/products", params={"search": "alfa"})
+        invalid_sort_response = client.get(
+            "/products", params={"sort_by": "supplier_id"}
+        )
+        invalid_order_response = client.get(
+            "/products", params={"sort_order": "sideways"}
+        )
+
+    assert [item["id"] for item in ascending_response.json()["items"]] == [
+        cheap_product["id"],
+        expensive_product["id"],
+    ]
+    assert [item["id"] for item in descending_response.json()["items"]] == [
+        expensive_product["id"],
+        cheap_product["id"],
+    ]
+    assert [item["id"] for item in sku_response.json()["items"]] == [cheap_product["id"]]
+    assert invalid_sort_response.status_code == 422
+    assert invalid_order_response.status_code == 422
 
 
 def test_create_stock_entry_updates_product_quantity():

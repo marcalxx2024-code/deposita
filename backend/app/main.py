@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -240,11 +241,33 @@ def create_product(
 @app.get("/products", response_model=schemas.PaginatedProductResponse)
 def list_products(
     search: str | None = None,
+    category: str | None = None,
+    supplier_id: int | None = Query(default=None, ge=1),
     low_stock: bool | None = None,
+    min_price: float | None = Query(default=None, ge=0),
+    max_price: float | None = Query(default=None, ge=0),
+    sort_by: Literal["name", "sku", "price", "quantity", "id"] = "id",
+    sort_order: Literal["asc", "desc"] = "asc",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise APIError(
+            status_code=422,
+            code="VALIDATION_ERROR",
+            message="min_price não pode ser maior que max_price",
+        )
+
+    # Keep this mapping explicit: query parameters must never select model
+    # attributes directly, which prevents arbitrary column ordering.
+    sortable_columns = {
+        "name": models.Product.name,
+        "sku": models.Product.sku,
+        "price": models.Product.price,
+        "quantity": models.Product.quantity,
+        "id": models.Product.id,
+    }
     query = db.query(models.Product)
 
     if search is not None:
@@ -262,9 +285,24 @@ def list_products(
     if low_stock is not None:
         query = filter_by_low_stock(query, low_stock)
 
+    if category is not None:
+        query = query.filter(models.Product.category == category)
+
+    if supplier_id is not None:
+        get_supplier_or_error(supplier_id, db)
+        query = query.filter(models.Product.supplier_id == supplier_id)
+
+    if min_price is not None:
+        query = query.filter(models.Product.price >= min_price)
+
+    if max_price is not None:
+        query = query.filter(models.Product.price <= max_price)
+
     total = query.count()
+    sort_column = sortable_columns[sort_by]
+    order_by = sort_column.asc() if sort_order == "asc" else sort_column.desc()
     products = (
-        query.order_by(models.Product.id.asc())
+        query.order_by(order_by, models.Product.id.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
