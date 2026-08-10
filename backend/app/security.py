@@ -9,6 +9,17 @@ from pwdlib import PasswordHash
 password_hash = PasswordHash.recommended()
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+INSECURE_SECRET_KEYS = frozenset(
+    {
+        "secret",
+        "password",
+        "changeme",
+        "change-me",
+        "deposita",
+        "your-secret-key",
+        "your-secret-key-here",
+    }
+)
 
 
 def hash_password(plain_password: str) -> str:
@@ -21,8 +32,17 @@ def verify_password(plain_password: str, stored_password_hash: str) -> bool:
 
 def get_secret_key() -> str:
     secret_key = os.getenv("DEPOSITA_SECRET_KEY")
-    if not secret_key:
+    if secret_key is None:
         raise RuntimeError("DEPOSITA_SECRET_KEY must be configured")
+
+    normalized_secret_key = secret_key.strip()
+    if not normalized_secret_key:
+        raise RuntimeError("DEPOSITA_SECRET_KEY must not be empty")
+    if normalized_secret_key.lower() in INSECURE_SECRET_KEYS:
+        raise RuntimeError("DEPOSITA_SECRET_KEY must not use a common insecure value")
+    if len(normalized_secret_key) < 32:
+        raise RuntimeError("DEPOSITA_SECRET_KEY must be at least 32 characters long")
+
     return secret_key
 
 

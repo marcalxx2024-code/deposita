@@ -80,13 +80,19 @@ Edite `.env` e configure:
 
 | Variável | Obrigatória | Descrição |
 | --- | --- | --- |
-| `DEPOSITA_SECRET_KEY` | Sim | Chave longa, aleatória e exclusiva para assinar JWTs. |
+| `DEPOSITA_SECRET_KEY` | Sim | Chave aleatória, exclusiva e com pelo menos 32 caracteres para assinar JWTs. |
 | `DATABASE_URL` | Não | URL SQLAlchemy; o padrão local é `sqlite:///./deposita.db`. |
 | `CORS_ORIGINS` | Não | Origins do frontend separadas por vírgula. |
 
 Exemplo de CORS local: `http://localhost:5173,http://127.0.0.1:5173`.
 Variáveis já definidas no sistema operacional têm prioridade sobre valores do
 `.env`.
+
+Para gerar uma chave segura localmente, sem versioná-la, execute:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
 
 ## Banco de dados e execução
 
