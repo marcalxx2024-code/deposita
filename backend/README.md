@@ -19,7 +19,7 @@ autenticação JWT, autorização por papéis e trilha de auditoria.
 
 ## Stack
 
-- Python, FastAPI e Uvicorn
+- Python 3.13, FastAPI e Uvicorn
 - SQLAlchemy e SQLite
 - Alembic
 - Pydantic e python-dotenv
@@ -166,6 +166,10 @@ são aceitas; `*` é rejeitado. Como a API usa JWT Bearer no header
 de acesso.
 
 ## Testes e verificações
+
+O repositório possui CI no GitHub Actions para `push` e `pull_request` em
+`main`. O workflow usa Ubuntu, Python 3.13 e um banco SQLite temporário, sem
+ler arquivos `.env` locais.
 
 Execute a suíte:
 

@@ -1,0 +1,36 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DEPOSITA_SECRET_KEY: ci-test-secret-not-for-production
+      DATABASE_URL: sqlite:///./ci_deposita.db
+      CORS_ORIGINS: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements-test.txt
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - name: Validate migrations on a temporary SQLite database
+        run: python -m alembic upgrade head
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Check migration metadata
+        run: python -m alembic check
+      - name: Compile application
+        run: python -m compileall app
