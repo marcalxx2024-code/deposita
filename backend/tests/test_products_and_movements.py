@@ -577,6 +577,127 @@ def test_invalid_payload_returns_safe_validation_details():
     assert all("input" not in detail for detail in error["details"])
 
 
+def test_product_validation_rejects_blank_negative_and_oversized_values():
+    invalid_products = (
+        {"name": "   "},
+        {"category": "   "},
+        {"price": -0.01},
+        {"quantity": -1},
+        {"minimum_quantity": -1},
+        {"sku": "S" * 65},
+        {"name": "N" * 101},
+        {"category": "C" * 51},
+    )
+    valid_product = {
+        "name": "  Produto válido  ",
+        "category": "  Categoria  ",
+        "quantity": 1,
+        "minimum_quantity": 0,
+        "price": 0,
+        "sku": "  valid-001  ",
+    }
+
+    with TestClient(app) as client:
+        headers = get_auth_headers(client)
+        responses = []
+        for invalid_fields in invalid_products:
+            payload = {**valid_product, **invalid_fields}
+            responses.append(client.post("/products", json=payload, headers=headers))
+        valid_response = client.post("/products", json=valid_product, headers=headers)
+
+    assert all(response.status_code == 422 for response in responses)
+    assert valid_response.status_code == 200
+    assert valid_response.json()["name"] == "Produto válido"
+    assert valid_response.json()["category"] == "Categoria"
+    assert valid_response.json()["sku"] == "VALID-001"
+
+
+def test_supplier_validation_rejects_blank_invalid_and_oversized_fields():
+    valid_supplier = {
+        "name": "  Fornecedor válido  ",
+        "contact_name": "  Contato  ",
+        "phone": "  11999999999  ",
+        "email": "  CONTATO@FORNECEDOR.TEST  ",
+    }
+    invalid_suppliers = (
+        {"name": "   "},
+        {"contact_name": "   "},
+        {"email": "email-inválido"},
+        {"phone": "1" * 31},
+        {"email": "e" * 256},
+    )
+
+    with TestClient(app) as client:
+        headers = get_auth_headers(client)
+        responses = []
+        for invalid_fields in invalid_suppliers:
+            payload = {**valid_supplier, **invalid_fields}
+            responses.append(client.post("/suppliers", json=payload, headers=headers))
+        valid_response = client.post("/suppliers", json=valid_supplier, headers=headers)
+
+    assert all(response.status_code == 422 for response in responses)
+    assert valid_response.status_code == 201
+    assert valid_response.json()["name"] == "Fornecedor válido"
+    assert valid_response.json()["contact_name"] == "Contato"
+    assert valid_response.json()["phone"] == "11999999999"
+    assert valid_response.json()["email"] == "contato@fornecedor.test"
+
+
+def test_movement_validation_rejects_non_positive_and_oversized_note():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=2)
+        headers = get_auth_headers(client)
+        zero_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 0},
+            headers=headers,
+        )
+        negative_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": -1},
+            headers=headers,
+        )
+        note_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 1, "note": "N" * 256},
+            headers=headers,
+        )
+        valid_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 1, "note": "  Reposição  "},
+            headers=headers,
+        )
+
+    assert zero_response.status_code == 422
+    assert negative_response.status_code == 422
+    assert note_response.status_code == 422
+    assert valid_response.status_code == 201
+    assert valid_response.json()["note"] == "Reposição"
+
+
+def test_user_validation_rejects_oversized_username_and_keeps_valid_input():
+    with TestClient(app) as client:
+        empty_username_response = client.post(
+            "/users", json={"username": "   ", "password": "uma-senha-segura"}
+        )
+        short_password_response = client.post(
+            "/users", json={"username": "usuario-curto", "password": "curta"}
+        )
+        oversized_response = client.post(
+            "/users", json={"username": "u" * 101, "password": "uma-senha-segura"}
+        )
+        valid_response = client.post(
+            "/users",
+            json={"username": "  usuario-valido  ", "password": "uma-senha-segura"},
+        )
+
+    assert empty_username_response.status_code == 422
+    assert short_password_response.status_code == 422
+    assert oversized_response.status_code == 422
+    assert valid_response.status_code == 201
+    assert valid_response.json()["username"] == "usuario-valido"
+
+
 def test_list_products_uses_default_pagination():
     with TestClient(app) as client:
         for index in range(21):
