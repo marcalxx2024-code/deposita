@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app import schemas
-from app.database import Base, engine, get_db, normalize_search_text
+from app.database import engine, get_db, normalize_search_text
 from app.errors import (
     APIError,
     forbidden_error,
@@ -28,7 +28,6 @@ from app.security import (
 )
 
 validate_auth_settings()
-Base.metadata.create_all(bind=engine)
 
 
 def validate_user_role_column() -> None:
@@ -196,10 +195,19 @@ def get_authenticated_user(current_user: models.User = Depends(get_current_user)
 def create_product(
     product: schemas.ProductCreate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(require_admin),
+    current_user: models.User = Depends(require_admin),
 ):
     db_product = models.Product(**product.model_dump())
     db.add(db_product)
+    db.flush()
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="product_created",
+            resource_type="product",
+            resource_id=db_product.id,
+        )
+    )
     db.commit()
     db.refresh(db_product)
     return db_product
@@ -287,7 +295,7 @@ def update_product(
     product_id: int,
     product_data: schemas.ProductUpdate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(require_admin),
+    current_user: models.User = Depends(require_admin),
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
@@ -298,6 +306,14 @@ def update_product(
     product.minimum_quantity = product_data.minimum_quantity
     product.price = product_data.price
 
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="product_updated",
+            resource_type="product",
+            resource_id=product.id,
+        )
+    )
     db.commit()
     db.refresh(product)
     return product
@@ -307,12 +323,20 @@ def update_product(
 def delete_product(
     product_id: int,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(require_admin),
+    current_user: models.User = Depends(require_admin),
 ):
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
         raise product_not_found_error()
 
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="product_deleted",
+            resource_type="product",
+            resource_id=product.id,
+        )
+    )
     db.delete(product)
     db.commit()
     return {"message": "Produto excluído com sucesso"}
@@ -327,7 +351,7 @@ def create_stock_entry(
     product_id: int,
     movement_data: schemas.StockMovementCreate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(require_inventory_write),
+    current_user: models.User = Depends(require_inventory_write),
 ):
     if movement_data.movement_type != "entry":
         raise APIError(
@@ -348,6 +372,14 @@ def create_stock_entry(
         note=movement_data.note,
     )
     db.add(movement)
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="stock_entry",
+            resource_type="product",
+            resource_id=product.id,
+        )
+    )
 
     try:
         db.commit()
@@ -368,7 +400,7 @@ def create_stock_exit(
     product_id: int,
     movement_data: schemas.StockMovementCreate,
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(require_inventory_write),
+    current_user: models.User = Depends(require_inventory_write),
 ):
     if movement_data.movement_type != "exit":
         raise APIError(
@@ -396,6 +428,14 @@ def create_stock_exit(
         note=movement_data.note,
     )
     db.add(movement)
+    db.add(
+        models.AuditLog(
+            user_id=current_user.id,
+            action="stock_exit",
+            resource_type="product",
+            resource_id=product.id,
+        )
+    )
 
     try:
         db.commit()
@@ -412,5 +452,17 @@ def list_stock_movements(db: Session = Depends(get_db)):
     return (
         db.query(models.StockMovement)
         .order_by(models.StockMovement.created_at.desc(), models.StockMovement.id.desc())
+        .all()
+    )
+
+
+@app.get("/audit-logs", response_model=list[schemas.AuditLogResponse])
+def list_audit_logs(
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(require_admin),
+):
+    return (
+        db.query(models.AuditLog)
+        .order_by(models.AuditLog.created_at.desc(), models.AuditLog.id.desc())
         .all()
     )

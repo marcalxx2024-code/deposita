@@ -3,6 +3,7 @@ import os
 from sqlalchemy import create_engine
 
 from app import database
+from app import models  # noqa: F401 - registers all models before creating test tables
 
 
 os.environ["DEPOSITA_SECRET_KEY"] = "test-only-key-for-deposita-not-a-production-secret-2026"
@@ -14,6 +15,7 @@ test_engine = create_engine(
     connect_args={"check_same_thread": False},
 )
 
-# app.main creates its tables during import. Point that initialization to the
-# dedicated test database before pytest imports the application module.
+# Create the schema only in the dedicated test database. Production schema is
+# managed by Alembic migrations.
 database.engine = test_engine
+database.Base.metadata.create_all(bind=test_engine)

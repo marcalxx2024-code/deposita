@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -962,3 +963,108 @@ def test_dashboard_summary_returns_five_most_recent_movements():
     assert [movement["id"] for movement in recent_movements] == [
         movement["id"] for movement in reversed(movement_responses[-5:])
     ]
+
+
+def test_audit_logs_record_product_and_stock_actions():
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        product = create_product(client, quantity=10)
+
+        update_response = client.put(
+            f"/products/{product['id']}",
+            json={
+                "name": "Produto atualizado",
+                "category": "Teste",
+                "minimum_quantity": 3,
+                "price": 12.0,
+            },
+            headers=admin_headers,
+        )
+        entry_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 2},
+            headers=admin_headers,
+        )
+        exit_response = client.post(
+            f"/products/{product['id']}/movements/exit",
+            json={"movement_type": "exit", "quantity": 1},
+            headers=admin_headers,
+        )
+        delete_response = client.delete(
+            f"/products/{product['id']}", headers=admin_headers
+        )
+        audit_response = client.get("/audit-logs", headers=admin_headers)
+
+    assert update_response.status_code == 200
+    assert entry_response.status_code == 201
+    assert exit_response.status_code == 201
+    assert delete_response.status_code == 200
+    assert audit_response.status_code == 200
+
+    audit_logs = audit_response.json()
+    assert [audit_log["action"] for audit_log in audit_logs] == [
+        "product_deleted",
+        "stock_exit",
+        "stock_entry",
+        "product_updated",
+        "product_created",
+    ]
+    assert all(audit_log["resource_type"] == "product" for audit_log in audit_logs)
+    assert all(audit_log["resource_id"] == product["id"] for audit_log in audit_logs)
+
+
+def test_operator_stock_movement_is_audited():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        operator_headers = get_operator_headers(client)
+        entry_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 2},
+            headers=operator_headers,
+        )
+        audit_response = client.get(
+            "/audit-logs", headers=get_auth_headers(client)
+        )
+
+    assert entry_response.status_code == 201
+    db = TestingSessionLocal()
+    try:
+        operator = db.query(User).filter(User.username == "test-operator").one()
+    finally:
+        db.close()
+    operator_log = next(
+        audit_log
+        for audit_log in audit_response.json()
+        if audit_log["action"] == "stock_entry"
+    )
+    assert operator_log["user_id"] == operator.id
+    assert operator_log["resource_id"] == product["id"]
+
+
+def test_operator_cannot_list_audit_logs():
+    with TestClient(app) as client:
+        response = client.get("/audit-logs", headers=get_operator_headers(client))
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_admin_can_list_audit_logs_without_sensitive_data():
+    with TestClient(app) as client:
+        admin_headers = get_auth_headers(client)
+        create_product(client, quantity=10)
+        response = client.get("/audit-logs", headers=admin_headers)
+
+    assert response.status_code == 200
+    audit_log = response.json()[0]
+    assert set(audit_log) == {
+        "id",
+        "user_id",
+        "action",
+        "resource_type",
+        "resource_id",
+        "created_at",
+    }
+    serialized_response = json.dumps(response.json())
+    for sensitive_field in ("password", "token", "secret", "jwt"):
+        assert sensitive_field not in serialized_response.lower()

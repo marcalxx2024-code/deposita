@@ -107,6 +107,17 @@ class StockMovementResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AuditLogResponse(BaseModel):
+    id: int
+    user_id: int
+    action: str
+    resource_type: str
+    resource_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class DashboardSummaryResponse(BaseModel):
     total_products: int
     total_stock_quantity: int
