@@ -627,24 +627,32 @@ def create_stock_exit(
 
 @app.get("/movements", response_model=list[schemas.StockMovementResponse])
 def list_stock_movements(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     _current_user: models.User = Depends(get_current_user),
 ):
     return (
         db.query(models.StockMovement)
         .order_by(models.StockMovement.created_at.desc(), models.StockMovement.id.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 
 
 @app.get("/audit-logs", response_model=list[schemas.AuditLogResponse])
 def list_audit_logs(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     _current_user: models.User = Depends(require_admin),
 ):
     return (
         db.query(models.AuditLog)
         .order_by(models.AuditLog.created_at.desc(), models.AuditLog.id.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 
@@ -673,10 +681,18 @@ def create_supplier(
 
 @app.get("/suppliers", response_model=list[schemas.SupplierResponse])
 def list_suppliers(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     _current_user: models.User = Depends(get_current_user),
 ):
-    return db.query(models.Supplier).order_by(models.Supplier.id.asc()).all()
+    return (
+        db.query(models.Supplier)
+        .order_by(models.Supplier.id.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @app.get("/suppliers/{supplier_id}", response_model=schemas.SupplierResponse)

@@ -6,6 +6,7 @@ from itertools import count
 from threading import Barrier
 
 import jwt
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -1766,6 +1767,71 @@ def test_list_stock_movements_returns_most_recent_first():
     assert movements[0]["movement_type"] == "exit"
     assert movements[1]["id"] == entry_response.json()["id"]
     assert movements[1]["movement_type"] == "entry"
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "record_count"),
+    [
+        ("/movements", 3),
+        ("/audit-logs", 3),
+        ("/suppliers", 3),
+    ],
+)
+def test_list_endpoints_support_offset_limit_pagination(endpoint, record_count):
+    with TestClient(app) as client:
+        headers = get_auth_headers(client)
+        product = create_product(client, quantity=10)
+
+        if endpoint == "/movements":
+            for _ in range(record_count):
+                response = client.post(
+                    f"/products/{product['id']}/movements/entry",
+                    json={"movement_type": "entry", "quantity": 1},
+                    headers=headers,
+                )
+                assert response.status_code == 201
+        elif endpoint == "/suppliers":
+            for index in range(record_count):
+                response = client.post(
+                    "/suppliers",
+                    json={"name": f"Fornecedor de paginação {index}"},
+                    headers=headers,
+                )
+                assert response.status_code == 201
+        else:
+            # Creating the product already writes one audit log; add two more.
+            for index in range(record_count - 1):
+                response = client.post(
+                    "/suppliers",
+                    json={"name": f"Fornecedor de auditoria {index}"},
+                    headers=headers,
+                )
+                assert response.status_code == 201
+
+        default_response = client.get(endpoint, headers=headers)
+        limit_response = client.get(f"{endpoint}?limit=2", headers=headers)
+        skip_response = client.get(f"{endpoint}?skip=1", headers=headers)
+        combined_response = client.get(f"{endpoint}?skip=1&limit=1", headers=headers)
+
+    assert default_response.status_code == 200
+    assert len(default_response.json()) == record_count
+    assert limit_response.status_code == 200
+    assert len(limit_response.json()) == 2
+    assert skip_response.status_code == 200
+    assert skip_response.json() == default_response.json()[1:]
+    assert combined_response.status_code == 200
+    assert combined_response.json() == default_response.json()[1:2]
+
+
+@pytest.mark.parametrize("endpoint", ["/movements", "/audit-logs", "/suppliers"])
+@pytest.mark.parametrize(
+    "query", ["limit=101", "limit=0", "skip=-1"],
+)
+def test_list_endpoints_reject_invalid_pagination(endpoint, query):
+    with TestClient(app) as client:
+        response = client.get(f"{endpoint}?{query}", headers=get_auth_headers(client))
+
+    assert response.status_code == 422
 
 
 def test_list_low_stock_products_returns_only_low_stock_in_quantity_order():
