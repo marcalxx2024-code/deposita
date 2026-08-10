@@ -26,6 +26,11 @@ def normalize_search_text(value: str | None) -> str:
 @event.listens_for(Engine, "connect")
 def register_sqlite_functions(dbapi_connection, _connection_record):
     if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
         dbapi_connection.create_function("normalize_search_text", 1, normalize_search_text)
 
 engine = create_engine(

@@ -1,16 +1,22 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from itertools import count
+from threading import Barrier
 
 import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
 from app.config import parse_cors_origins
-from app.main import app
+from app.bootstrap_admin import BootstrapAdminError, bootstrap_admin
+from app import models, schemas
+from app.errors import APIError
+from app.main import app, create_stock_entry, create_stock_exit
 from app.models import User, UserRole
 from app.security import create_access_token, hash_password, verify_password
 
@@ -80,6 +86,7 @@ def get_operator_headers(client: TestClient) -> dict[str, str]:
     create_user_response = client.post(
         "/users",
         json={"username": "test-operator", "password": "uma-senha-segura"},
+        headers=get_auth_headers(client),
     )
     assert create_user_response.status_code == 201
     login_response = client.post(
@@ -122,6 +129,72 @@ def test_create_product_returns_id():
         product = create_product(client, quantity=10)
 
     assert isinstance(product["id"], int)
+
+
+def test_bootstrap_creates_first_admin_and_admin_login_works():
+    db = TestingSessionLocal()
+    try:
+        admin = bootstrap_admin("bootstrap-admin", "uma-senha-segura", db)
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        login_response = client.post(
+            "/auth/login",
+            json={"username": "bootstrap-admin", "password": "uma-senha-segura"},
+        )
+
+    assert admin.role == UserRole.ADMIN.value
+    assert login_response.status_code == 200
+
+
+def test_bootstrap_refuses_to_create_a_second_admin():
+    db = TestingSessionLocal()
+    try:
+        bootstrap_admin("bootstrap-admin", "uma-senha-segura", db)
+        try:
+            bootstrap_admin("another-admin", "uma-senha-segura", db)
+        except BootstrapAdminError as exc:
+            assert str(exc) == "Já existe um usuário ADMIN neste banco"
+        else:
+            raise AssertionError("O segundo bootstrap ADMIN deveria ser recusado")
+    finally:
+        db.close()
+
+
+def test_user_provisioning_requires_admin_and_cannot_escalate_role():
+    with TestClient(app) as client:
+        unauthenticated_response = client.post(
+            "/users",
+            json={"username": "new-operator", "password": "uma-senha-segura"},
+        )
+        admin_headers = get_auth_headers(client)
+        operator_headers = get_operator_headers(client)
+        operator_response = client.post(
+            "/users",
+            json={"username": "blocked-operator", "password": "uma-senha-segura"},
+            headers=operator_headers,
+        )
+        admin_response = client.post(
+            "/users",
+            json={"username": "new-operator", "password": "uma-senha-segura"},
+            headers=admin_headers,
+        )
+        role_escalation_response = client.post(
+            "/users",
+            json={
+                "username": "attempted-admin",
+                "password": "uma-senha-segura",
+                "role": "admin",
+            },
+            headers=admin_headers,
+        )
+
+    assert unauthenticated_response.status_code == 401
+    assert operator_response.status_code == 403
+    assert admin_response.status_code == 201
+    assert admin_response.json()["role"] == UserRole.OPERATOR.value
+    assert role_escalation_response.status_code == 422
 
 
 def test_parse_cors_origins_accepts_single_multiple_and_spaced_values():
@@ -238,7 +311,10 @@ def test_admin_can_execute_all_write_endpoints():
             json={"movement_type": "exit", "quantity": 1},
             headers=headers,
         )
-        delete_response = client.delete(f"/products/{product_id}", headers=headers)
+        deletable_product = create_product(client, quantity=10)
+        delete_response = client.delete(
+            f"/products/{deletable_product['id']}", headers=headers
+        )
 
     assert create_response.status_code == 200
     assert update_response.status_code == 200
@@ -388,6 +464,7 @@ def test_create_user_hashes_password_and_hides_sensitive_fields():
         response = client.post(
             "/users",
             json={"username": "guilherme", "password": plain_password},
+            headers=get_auth_headers(client),
         )
 
     assert response.status_code == 201
@@ -419,6 +496,7 @@ def test_create_user_does_not_accept_a_client_selected_role():
                 "password": "uma-senha-segura",
                 "role": "admin",
             },
+            headers=get_auth_headers(client),
         )
 
     assert response.status_code == 422
@@ -427,13 +505,16 @@ def test_create_user_does_not_accept_a_client_selected_role():
 
 def test_create_user_rejects_duplicate_username():
     with TestClient(app) as client:
+        headers = get_auth_headers(client)
         first_response = client.post(
             "/users",
             json={"username": "guilherme", "password": "uma-senha-segura"},
+            headers=headers,
         )
         duplicate_response = client.post(
             "/users",
             json={"username": "guilherme", "password": "outra-senha-segura"},
+            headers=headers,
         )
 
     assert first_response.status_code == 201
@@ -443,17 +524,21 @@ def test_create_user_rejects_duplicate_username():
 
 def test_create_user_validates_password_length_and_username():
     with TestClient(app) as client:
+        headers = get_auth_headers(client)
         short_password_response = client.post(
             "/users",
             json={"username": "guilherme", "password": "curta"},
+            headers=headers,
         )
         empty_username_response = client.post(
             "/users",
             json={"username": "", "password": "uma-senha-segura"},
+            headers=headers,
         )
         whitespace_username_response = client.post(
             "/users",
             json={"username": "   ", "password": "uma-senha-segura"},
+            headers=headers,
         )
 
     for response in (
@@ -470,6 +555,7 @@ def test_login_returns_bearer_access_token_for_valid_credentials():
         create_user_response = client.post(
             "/users",
             json={"username": "guilherme", "password": "uma-senha-segura"},
+            headers=get_auth_headers(client),
         )
         response = client.post(
             "/auth/login",
@@ -487,6 +573,7 @@ def test_login_returns_same_error_for_invalid_credentials():
         create_user_response = client.post(
             "/users",
             json={"username": "guilherme", "password": "uma-senha-segura"},
+            headers=get_auth_headers(client),
         )
         wrong_password_response = client.post(
             "/auth/login",
@@ -511,6 +598,7 @@ def test_auth_me_requires_a_valid_token_and_hides_password_hash():
         user_response = client.post(
             "/users",
             json={"username": "guilherme", "password": "uma-senha-segura"},
+            headers=get_auth_headers(client),
         )
         login_response = client.post(
             "/auth/login",
@@ -537,6 +625,7 @@ def test_auth_me_rejects_tampered_expired_and_unexpected_algorithm_tokens():
         user_response = client.post(
             "/users",
             json={"username": "guilherme", "password": "uma-senha-segura"},
+            headers=get_auth_headers(client),
         )
         user_id = user_response.json()["id"]
         expired_token = create_access_token(
@@ -640,10 +729,14 @@ def test_error_responses_use_a_safe_and_consistent_envelope():
         )
         not_found_response = client.get("/products/999")
         first_user_response = client.post(
-            "/users", json={"username": "duplicado", "password": "uma-senha-segura"}
+            "/users",
+            json={"username": "duplicado", "password": "uma-senha-segura"},
+            headers=admin_headers,
         )
         conflict_response = client.post(
-            "/users", json={"username": "duplicado", "password": "outra-senha-segura"}
+            "/users",
+            json={"username": "duplicado", "password": "outra-senha-segura"},
+            headers=admin_headers,
         )
         validation_response = client.get(
             "/products", params={"min_price": 20, "max_price": 10}
@@ -783,18 +876,26 @@ def test_movement_validation_rejects_non_positive_and_oversized_note():
 
 def test_user_validation_rejects_oversized_username_and_keeps_valid_input():
     with TestClient(app) as client:
+        headers = get_auth_headers(client)
         empty_username_response = client.post(
-            "/users", json={"username": "   ", "password": "uma-senha-segura"}
+            "/users",
+            json={"username": "   ", "password": "uma-senha-segura"},
+            headers=headers,
         )
         short_password_response = client.post(
-            "/users", json={"username": "usuario-curto", "password": "curta"}
+            "/users",
+            json={"username": "usuario-curto", "password": "curta"},
+            headers=headers,
         )
         oversized_response = client.post(
-            "/users", json={"username": "u" * 101, "password": "uma-senha-segura"}
+            "/users",
+            json={"username": "u" * 101, "password": "uma-senha-segura"},
+            headers=headers,
         )
         valid_response = client.post(
             "/users",
             json={"username": "  usuario-valido  ", "password": "uma-senha-segura"},
+            headers=headers,
         )
 
     assert empty_username_response.status_code == 422
@@ -1128,6 +1229,262 @@ def test_stock_exit_larger_than_available_stock_is_rejected():
     assert product_response.json()["quantity"] == 3
 
 
+def test_sqlite_foreign_keys_are_enabled_and_reject_orphan_records():
+    with test_engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+
+    invalid_records = (
+        models.Product(
+            name="Fornecedor inexistente",
+            category="Teste",
+            quantity=0,
+            minimum_quantity=0,
+            price=10,
+            supplier_id=999,
+            sku="INVALID-SUPPLIER",
+        ),
+        models.StockMovement(
+            product_id=999,
+            movement_type="entry",
+            quantity=1,
+        ),
+        models.AuditLog(
+            user_id=999,
+            action="invalid_audit",
+            resource_type="test",
+            resource_id=1,
+        ),
+    )
+    db = TestingSessionLocal()
+    try:
+        for invalid_record in invalid_records:
+            db.add(invalid_record)
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+            else:
+                raise AssertionError("Foreign key inválida deveria ser rejeitada")
+    finally:
+        db.close()
+
+
+def test_product_with_movements_cannot_be_deleted_and_history_is_preserved():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        headers = get_auth_headers(client)
+        movement_response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 1},
+            headers=headers,
+        )
+        delete_response = client.delete(f"/products/{product['id']}", headers=headers)
+        product_response = client.get(f"/products/{product['id']}")
+        movements_response = client.get("/movements")
+
+    assert movement_response.status_code == 201
+    assert delete_response.status_code == 409
+    assert delete_response.json()["error"]["code"] == "PRODUCT_HAS_MOVEMENTS"
+    assert product_response.status_code == 200
+    assert [movement["id"] for movement in movements_response.json()] == [
+        movement_response.json()["id"]
+    ]
+
+
+def test_product_without_movements_can_be_deleted():
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        delete_response = client.delete(
+            f"/products/{product['id']}", headers=get_auth_headers(client)
+        )
+        product_response = client.get(f"/products/{product['id']}")
+
+    assert delete_response.status_code == 200
+    assert product_response.status_code == 404
+
+
+def create_concurrent_stock_database(tmp_path, quantity: int):
+    database_path = tmp_path / "concurrent_stock.db"
+    concurrent_engine = create_engine(
+        f"sqlite:///{database_path.as_posix()}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    ConcurrentSession = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=concurrent_engine,
+    )
+    Base.metadata.create_all(bind=concurrent_engine)
+
+    db = ConcurrentSession()
+    try:
+        admin = User(
+            username="concurrent-admin",
+            password_hash=hash_password("uma-senha-segura"),
+            role=UserRole.ADMIN.value,
+        )
+        product = models.Product(
+            name="Produto concorrente",
+            category="Teste",
+            quantity=quantity,
+            minimum_quantity=0,
+            price=10,
+            sku="CONCURRENT-001",
+        )
+        db.add_all([admin, product])
+        db.commit()
+        return concurrent_engine, ConcurrentSession, admin.id, product.id
+    finally:
+        db.close()
+
+
+def test_concurrent_stock_exits_keep_balance_and_movements_consistent(tmp_path):
+    concurrent_engine, ConcurrentSession, admin_id, product_id = (
+        create_concurrent_stock_database(tmp_path, quantity=10)
+    )
+
+    start_requests = Barrier(2)
+
+    def create_exit() -> str:
+        db = ConcurrentSession()
+        try:
+            admin = db.get(User, admin_id)
+            start_requests.wait()
+            try:
+                create_stock_exit(
+                    product_id=product_id,
+                    movement_data=schemas.StockMovementCreate(
+                        movement_type="exit", quantity=7
+                    ),
+                    db=db,
+                    current_user=admin,
+                )
+                return "success"
+            except APIError as exc:
+                return exc.code
+        finally:
+            db.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _index: create_exit(), range(2)))
+
+        db = ConcurrentSession()
+        try:
+            product = db.get(models.Product, product_id)
+            movements = db.query(models.StockMovement).all()
+            audits = db.query(models.AuditLog).all()
+        finally:
+            db.close()
+    finally:
+        concurrent_engine.dispose()
+
+    assert sorted(results) == ["INSUFFICIENT_STOCK", "success"]
+    assert product.quantity == 3
+    assert sum(movement.quantity for movement in movements) == 7
+    assert len(movements) == 1
+    assert len(audits) == 1
+
+
+def test_concurrent_stock_entries_accumulate_all_movements(tmp_path):
+    concurrent_engine, ConcurrentSession, admin_id, product_id = (
+        create_concurrent_stock_database(tmp_path, quantity=0)
+    )
+
+    start_requests = Barrier(2)
+
+    def create_entry() -> str:
+        db = ConcurrentSession()
+        try:
+            admin = db.get(User, admin_id)
+            start_requests.wait()
+            create_stock_entry(
+                product_id=product_id,
+                movement_data=schemas.StockMovementCreate(
+                    movement_type="entry", quantity=7
+                ),
+                db=db,
+                current_user=admin,
+            )
+            return "success"
+        finally:
+            db.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _index: create_entry(), range(2)))
+
+        db = ConcurrentSession()
+        try:
+            product = db.get(models.Product, product_id)
+            movements = db.query(models.StockMovement).all()
+            audits = db.query(models.AuditLog).all()
+        finally:
+            db.close()
+    finally:
+        concurrent_engine.dispose()
+
+    assert results == ["success", "success"]
+    assert product.quantity == 14
+    assert sum(movement.quantity for movement in movements) == 14
+    assert len(movements) == 2
+    assert len(audits) == 2
+
+
+def test_stock_entry_rolls_back_when_movement_creation_fails(monkeypatch):
+    original_movement = models.StockMovement
+
+    def failing_movement(**_kwargs):
+        raise SQLAlchemyError("movement insert failure")
+
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        monkeypatch.setattr(models, "StockMovement", failing_movement)
+        response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 5},
+            headers=get_auth_headers(client),
+        )
+
+    db = TestingSessionLocal()
+    try:
+        stored_product = db.get(models.Product, product["id"])
+        assert db.query(original_movement).count() == 0
+        assert db.query(models.AuditLog).count() == 1
+    finally:
+        db.close()
+
+    assert response.status_code == 500
+    assert stored_product.quantity == 10
+
+
+def test_stock_entry_rolls_back_when_audit_creation_fails(monkeypatch):
+    original_audit_log = models.AuditLog
+
+    def failing_audit_log(**_kwargs):
+        raise SQLAlchemyError("audit insert failure")
+
+    with TestClient(app) as client:
+        product = create_product(client, quantity=10)
+        monkeypatch.setattr(models, "AuditLog", failing_audit_log)
+        response = client.post(
+            f"/products/{product['id']}/movements/entry",
+            json={"movement_type": "entry", "quantity": 5},
+            headers=get_auth_headers(client),
+        )
+
+    db = TestingSessionLocal()
+    try:
+        stored_product = db.get(models.Product, product["id"])
+        assert db.query(models.StockMovement).count() == 0
+        assert db.query(original_audit_log).count() == 1
+    finally:
+        db.close()
+
+    assert response.status_code == 500
+    assert stored_product.quantity == 10
+
+
 def test_movement_for_nonexistent_product_is_rejected():
     with TestClient(app) as client:
         response = client.post(
@@ -1351,12 +1708,12 @@ def test_audit_logs_record_product_and_stock_actions():
     assert update_response.status_code == 200
     assert entry_response.status_code == 201
     assert exit_response.status_code == 201
-    assert delete_response.status_code == 200
+    assert delete_response.status_code == 409
+    assert delete_response.json()["error"]["code"] == "PRODUCT_HAS_MOVEMENTS"
     assert audit_response.status_code == 200
 
     audit_logs = audit_response.json()
     assert [audit_log["action"] for audit_log in audit_logs] == [
-        "product_deleted",
         "stock_exit",
         "stock_entry",
         "product_updated",

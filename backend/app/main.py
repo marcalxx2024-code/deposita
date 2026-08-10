@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from jwt import InvalidTokenError
-from sqlalchemy import func, inspect, or_
+from sqlalchemy import func, inspect, or_, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from app.errors import (
     invalid_movement_type_error,
     invalid_price_range_error,
     insufficient_stock_error,
+    product_has_movements_error,
     product_not_found_error,
     sku_already_exists_error,
     supplier_in_use_error,
@@ -141,25 +142,6 @@ def health_check():
     return {"status": "online"}
 
 
-@app.post("/users", response_model=schemas.UserResponse, status_code=201)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = models.User(
-        username=user.username,
-        password_hash=hash_password(user.password),
-        role=models.UserRole.OPERATOR.value,
-    )
-    db.add(db_user)
-
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise username_already_exists_error()
-
-    db.refresh(db_user)
-    return db_user
-
-
 def get_current_user(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
@@ -200,6 +182,30 @@ require_inventory_write = require_roles(
     models.UserRole.ADMIN,
     models.UserRole.OPERATOR,
 )
+
+
+@app.post("/users", response_model=schemas.UserResponse, status_code=201)
+def create_user(
+    user: schemas.UserCreate,
+    db: Session = Depends(get_db),
+    _current_user: models.User = Depends(require_admin),
+):
+    """Provision an operator account; administrator accounts are bootstrap-only."""
+    db_user = models.User(
+        username=user.username,
+        password_hash=hash_password(user.password),
+        role=models.UserRole.OPERATOR.value,
+    )
+    db.add(db_user)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise username_already_exists_error()
+
+    db.refresh(db_user)
+    return db_user
 
 
 @app.post("/auth/login", response_model=schemas.TokenResponse)
@@ -410,6 +416,10 @@ def delete_product(
     product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if product is None:
         raise product_not_found_error()
+    if db.query(models.StockMovement.id).filter(
+        models.StockMovement.product_id == product_id
+    ).first():
+        raise product_has_movements_error()
 
     db.add(
         models.AuditLog(
@@ -438,28 +448,32 @@ def create_stock_entry(
     if movement_data.movement_type != "entry":
         raise invalid_movement_type_error()
 
-    product = db.query(models.Product).filter(models.Product.id == product_id).first()
-    if product is None:
-        raise product_not_found_error()
-
-    product.quantity += movement_data.quantity
-    movement = models.StockMovement(
-        product_id=product_id,
-        movement_type="entry",
-        quantity=movement_data.quantity,
-        note=movement_data.note,
-    )
-    db.add(movement)
-    db.add(
-        models.AuditLog(
-            user_id=current_user.id,
-            action="stock_entry",
-            resource_type="product",
-            resource_id=product.id,
-        )
-    )
-
     try:
+        result = db.execute(
+            update(models.Product)
+            .where(models.Product.id == product_id)
+            .values(quantity=models.Product.quantity + movement_data.quantity)
+        )
+        if result.rowcount != 1:
+            db.rollback()
+            raise product_not_found_error()
+
+        movement = models.StockMovement(
+            product_id=product_id,
+            movement_type="entry",
+            quantity=movement_data.quantity,
+            note=movement_data.note,
+        )
+        db.add(movement)
+        db.add(
+            models.AuditLog(
+                user_id=current_user.id,
+                action="stock_entry",
+                resource_type="product",
+                resource_id=product_id,
+            )
+        )
+        db.flush()
         db.commit()
     except SQLAlchemyError:
         db.rollback()
@@ -483,31 +497,38 @@ def create_stock_exit(
     if movement_data.movement_type != "exit":
         raise invalid_movement_type_error()
 
-    product = db.query(models.Product).filter(models.Product.id == product_id).first()
-    if product is None:
-        raise product_not_found_error()
-
-    if movement_data.quantity > product.quantity:
-        raise insufficient_stock_error()
-
-    product.quantity -= movement_data.quantity
-    movement = models.StockMovement(
-        product_id=product_id,
-        movement_type="exit",
-        quantity=movement_data.quantity,
-        note=movement_data.note,
-    )
-    db.add(movement)
-    db.add(
-        models.AuditLog(
-            user_id=current_user.id,
-            action="stock_exit",
-            resource_type="product",
-            resource_id=product.id,
-        )
-    )
-
     try:
+        result = db.execute(
+            update(models.Product)
+            .where(
+                models.Product.id == product_id,
+                models.Product.quantity >= movement_data.quantity,
+            )
+            .values(quantity=models.Product.quantity - movement_data.quantity)
+        )
+        if result.rowcount != 1:
+            product_exists = db.get(models.Product, product_id) is not None
+            db.rollback()
+            if not product_exists:
+                raise product_not_found_error()
+            raise insufficient_stock_error()
+
+        movement = models.StockMovement(
+            product_id=product_id,
+            movement_type="exit",
+            quantity=movement_data.quantity,
+            note=movement_data.note,
+        )
+        db.add(movement)
+        db.add(
+            models.AuditLog(
+                user_id=current_user.id,
+                action="stock_exit",
+                resource_type="product",
+                resource_id=product_id,
+            )
+        )
+        db.flush()
         db.commit()
     except SQLAlchemyError:
         db.rollback()

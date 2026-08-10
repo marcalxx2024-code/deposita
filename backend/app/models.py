@@ -43,7 +43,11 @@ class Supplier(Base):
     email = Column(String, nullable=True)
     created_at = Column(UTCDateTime(), nullable=False, default=utc_now)
 
-    products = relationship("Product", back_populates="supplier")
+    products = relationship(
+        "Product",
+        back_populates="supplier",
+        passive_deletes=True,
+    )
 
 
 class Product(Base):
@@ -63,7 +67,7 @@ class Product(Base):
     movements = relationship(
         "StockMovement",
         back_populates="product",
-        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -97,7 +101,11 @@ class User(Base):
     role = Column(String, nullable=False, default=UserRole.OPERATOR.value)
     created_at = Column(UTCDateTime(), nullable=False, default=utc_now)
 
-    audit_logs = relationship("AuditLog", back_populates="user")
+    audit_logs = relationship(
+        "AuditLog",
+        back_populates="user",
+        passive_deletes=True,
+    )
 
 
 class AuditLog(Base):

@@ -22,6 +22,14 @@ def product_not_found_error() -> APIError:
     )
 
 
+def product_has_movements_error() -> APIError:
+    return APIError(
+        status_code=409,
+        code="PRODUCT_HAS_MOVEMENTS",
+        message="Produto possui movimentações de estoque",
+    )
+
+
 def sku_already_exists_error() -> APIError:
     return APIError(
         status_code=409,
