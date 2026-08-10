@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
+from app.config import parse_cors_origins
 from app.main import app
 from app.models import User, UserRole
 from app.security import create_access_token, hash_password, verify_password
@@ -121,6 +122,50 @@ def test_create_product_returns_id():
         product = create_product(client, quantity=10)
 
     assert isinstance(product["id"], int)
+
+
+def test_parse_cors_origins_accepts_single_multiple_and_spaced_values():
+    assert parse_cors_origins("http://frontend.test") == ["http://frontend.test"]
+    assert parse_cors_origins("http://one.test,http://two.test") == [
+        "http://one.test",
+        "http://two.test",
+    ]
+    assert parse_cors_origins(" http://one.test , http://two.test ") == [
+        "http://one.test",
+        "http://two.test",
+    ]
+
+
+def test_parse_cors_origins_returns_no_origins_for_empty_configuration():
+    assert parse_cors_origins("") == []
+    assert parse_cors_origins("   ") == []
+
+
+def test_cors_allows_configured_origin_only_and_never_returns_the_secret_key():
+    with TestClient(app) as client:
+        allowed_response = client.options(
+            "/products",
+            headers={
+                "Origin": "http://frontend.test",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        denied_response = client.options(
+            "/products",
+            headers={
+                "Origin": "http://untrusted.test",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        response = client.get("/health", headers={"Origin": "http://frontend.test"})
+
+    assert allowed_response.status_code == 200
+    assert allowed_response.headers["access-control-allow-origin"] == "http://frontend.test"
+    assert "access-control-allow-credentials" not in allowed_response.headers
+    assert denied_response.status_code == 400
+    assert "access-control-allow-origin" not in denied_response.headers
+    assert response.status_code == 200
+    assert os.environ["DEPOSITA_SECRET_KEY"] not in response.text
 
 
 def test_write_endpoints_require_authentication():

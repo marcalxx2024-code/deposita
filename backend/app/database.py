@@ -5,7 +5,10 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = "sqlite:///./deposita.db"
+from app.config import get_database_url
+
+
+DATABASE_URL = get_database_url()
 
 
 def normalize_search_text(value: str | None) -> str:

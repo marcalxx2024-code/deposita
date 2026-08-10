@@ -4,3 +4,4 @@ pwdlib[argon2]
 PyJWT
 uvicorn
 alembic
+python-dotenv

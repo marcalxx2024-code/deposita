@@ -3,6 +3,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from jwt import InvalidTokenError
 from sqlalchemy import func, inspect, or_
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app import schemas
+from app.config import parse_cors_origins
 from app.database import engine, get_db, normalize_search_text
 from app.errors import (
     APIError,
@@ -49,6 +51,13 @@ def validate_user_role_column() -> None:
 validate_user_role_column()
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=parse_cors_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 logger = logging.getLogger(__name__)
 DUMMY_PASSWORD_HASH = hash_password("not-a-valid-user-password")
 

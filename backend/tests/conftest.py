@@ -7,6 +7,7 @@ from app import models  # noqa: F401 - registers all models before creating test
 
 
 os.environ["DEPOSITA_SECRET_KEY"] = "test-only-key-for-deposita-not-a-production-secret-2026"
+os.environ["CORS_ORIGINS"] = "http://frontend.test"
 
 
 TEST_DATABASE_URL = "sqlite:///./test_deposita.db"
