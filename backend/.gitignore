@@ -1,3 +1,10 @@
 .env
 .env.*
 !.env.example
+
+# Local environments, SQLite databases, and Python caches.
+.venv/
+*.db
+.pytest_cache/
+__pycache__/
+*.py[cod]
