@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title">
   <title id="title">Deposita</title>
-  <path fill="#0d151e" d="M4 4h40v40H4z"/>
-  <path fill="#34495d" d="M8 8h32v4H8zm0 28h32v4H8zM8 12h4v24H8zm28 0h4v24h-4z"/>
-  <path fill="#6e5124" d="M14 14h20v20H14z"/>
-  <path fill="#d2a64e" d="M14 14h20v4H14zm0 16h20v4H14zm0-12h4v12h-4zm16 0h4v12h-4zm-10 2h8v8h-8z"/>
-  <path fill="#111b26" d="M22 22h4v4h-4z"/>
+  <path fill="#161411" d="M4 4h40v40H4z"/>
+  <path fill="#514637" d="M8 8h32v4H8zm0 28h32v4H8zM8 12h4v24H8zm28 0h4v24h-4z"/>
+  <path fill="#8b4d20" d="M14 14h20v20H14z"/>
+  <path fill="#e0b45a" d="M14 14h20v4H14zm0 16h20v4H14zm0-12h4v12h-4zm16 0h4v12h-4zm-10 2h8v8h-8z"/>
+  <path fill="#211e19" d="M22 22h4v4h-4z"/>
 </svg>
