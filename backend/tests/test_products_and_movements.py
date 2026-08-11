@@ -13,14 +13,19 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
-from app.config import parse_cors_origins
+from app.config import get_demo_mode, get_demo_username, parse_cors_origins
 from app.bootstrap_admin import BootstrapAdminError, bootstrap_admin
 from app import models, schemas
 from app.errors import APIError
 import app.main as main_module
 from app.main import app, create_stock_entry, create_stock_exit
 from app.models import User, UserRole
-from app.security import create_access_token, hash_password, verify_password
+from app.security import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 
 
 TEST_DATABASE_URL = "sqlite:///./test_deposita.db"
@@ -40,6 +45,27 @@ def override_get_db():
     db = TestingSessionLocal()
     try:
         yield db
+    finally:
+        db.close()
+
+
+def create_test_user(
+    username: str,
+    password: str = "uma-senha-segura",
+    role: UserRole = UserRole.OPERATOR,
+) -> User:
+    db = TestingSessionLocal()
+    try:
+        user = User(
+            username=username,
+            password_hash=hash_password(password),
+            role=role.value,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        db.expunge(user)
+        return user
     finally:
         db.close()
 
@@ -214,6 +240,121 @@ def test_parse_cors_origins_accepts_single_multiple_and_spaced_values():
 def test_parse_cors_origins_returns_no_origins_for_empty_configuration():
     assert parse_cors_origins("") == []
     assert parse_cors_origins("   ") == []
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on"])
+def test_demo_mode_accepts_common_true_values(monkeypatch, value):
+    monkeypatch.setenv("DEMO_MODE", value)
+
+    assert get_demo_mode() is True
+
+
+@pytest.mark.parametrize("value", ["false", "FALSE", "0", "no", "off"])
+def test_demo_mode_accepts_common_false_values(monkeypatch, value):
+    monkeypatch.setenv("DEMO_MODE", value)
+
+    assert get_demo_mode() is False
+
+
+def test_demo_configuration_defaults_and_rejects_invalid_values(monkeypatch):
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    monkeypatch.delenv("DEMO_USERNAME", raising=False)
+
+    assert get_demo_mode() is False
+    assert get_demo_username() == "demo"
+
+    monkeypatch.setenv("DEMO_MODE", "enabled")
+    with pytest.raises(ValueError, match="DEMO_MODE"):
+        get_demo_mode()
+
+    monkeypatch.setenv("DEMO_USERNAME", "   ")
+    with pytest.raises(ValueError, match="DEMO_USERNAME"):
+        get_demo_username()
+
+
+def test_demo_login_is_unavailable_when_demo_mode_is_disabled(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setenv("DEMO_USERNAME", "demo")
+    create_test_user("demo")
+
+    with TestClient(app) as client:
+        response = client.post("/auth/demo")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_demo_login_returns_not_found_when_configured_user_does_not_exist(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("DEMO_USERNAME", "missing-demo")
+
+    with TestClient(app) as client:
+        response = client.post("/auth/demo")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_demo_login_refuses_a_non_operator_user(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("DEMO_USERNAME", "demo-admin")
+    create_test_user("demo-admin", role=UserRole.ADMIN)
+
+    with TestClient(app) as client:
+        response = client.post("/auth/demo")
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_demo_operator_receives_a_valid_token_for_the_correct_user(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("DEMO_USERNAME", "portfolio-demo")
+    demo_user = create_test_user("portfolio-demo")
+
+    with TestClient(app) as client:
+        response = client.post("/auth/demo")
+
+    assert response.status_code == 200
+    assert response.json()["token_type"] == "bearer"
+    assert decode_access_token(response.json()["access_token"]) == str(demo_user.id)
+
+
+def test_demo_operator_remains_forbidden_from_administrative_routes(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("DEMO_USERNAME", "demo")
+    create_test_user("demo")
+
+    with TestClient(app) as client:
+        token_response = client.post("/auth/demo")
+        response = client.post(
+            "/users",
+            json={"username": "should-not-exist", "password": "senha-segura"},
+            headers={
+                "Authorization": f"Bearer {token_response.json()['access_token']}"
+            },
+        )
+
+    assert token_response.status_code == 200
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_conventional_login_continues_to_work_with_demo_mode_disabled(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "false")
+    user = create_test_user("regular-operator", password="senha-convencional")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/auth/login",
+            json={
+                "username": "regular-operator",
+                "password": "senha-convencional",
+            },
+        )
+
+    assert response.status_code == 200
+    assert decode_access_token(response.json()["access_token"]) == str(user.id)
 
 
 def test_cors_allows_configured_origin_only_and_never_returns_the_secret_key():

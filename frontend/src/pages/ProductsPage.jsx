@@ -7,6 +7,7 @@ import {
   updateProduct,
 } from '../services/products.js'
 import { listSuppliers } from '../services/suppliers.js'
+import { useAuth } from '../hooks/useAuth.js'
 import { formatCurrency } from '../utils/formatters.js'
 
 const emptyProduct = {
@@ -32,6 +33,8 @@ function toProductForm(product) {
 }
 
 function ProductsPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [productsData, setProductsData] = useState(null)
   const [suppliers, setSuppliers] = useState([])
   const [page, setPage] = useState(1)
@@ -211,7 +214,7 @@ function ProductsPage() {
           <span className="eyebrow">Catálogo de inventário</span>
           <h1>Produtos</h1>
         </div>
-        <button type="button" onClick={openNewProduct}>Novo produto</button>
+        {isAdmin && <button type="button" onClick={openNewProduct}>Novo produto</button>}
       </div>
 
       <form className="panel panel--filters form-grid" onSubmit={handleFilterSubmit}>
@@ -223,7 +226,7 @@ function ProductsPage() {
         <div className="form-actions"><button className="button-secondary" type="submit">Aplicar filtros</button></div>
       </form>
 
-      {showForm && (
+      {isAdmin && showForm && (
         <form className="panel panel--operation form-grid" onSubmit={handleProductSubmit}>
           <h2>{editingProduct ? 'Editar produto' : 'Novo produto'}</h2>
           <label>SKU<input maxLength="64" onChange={(event) => updateForm('sku', event.target.value)} required value={form.sku} /></label>
@@ -274,12 +277,12 @@ function ProductsPage() {
                     <td data-label="Ações">
                       <div className="inline-actions">
                         <button aria-controls={`product-${product.id}-category product-${product.id}-price product-${product.id}-supplier`} aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>
-                        {product.is_active ? (
+                        {isAdmin && (product.is_active ? (
                           <>
                             <button className="button-secondary" disabled={processingProductId === product.id} onClick={() => openEditProduct(product)} type="button">Editar</button>
                             <button className="button-danger" disabled={processingProductId === product.id} onClick={() => handleDeactivate(product)} type="button">{processingProductId === product.id ? 'Inativando...' : 'Inativar'}</button>
                           </>
-                        ) : <button className="button-positive" disabled={processingProductId === product.id} onClick={() => handleReactivate(product)} type="button">{processingProductId === product.id ? 'Reativando...' : 'Reativar'}</button>}
+                        ) : <button className="button-positive" disabled={processingProductId === product.id} onClick={() => handleReactivate(product)} type="button">{processingProductId === product.id ? 'Reativando...' : 'Reativar'}</button>)}
                       </div>
                     </td>
                   </tr>

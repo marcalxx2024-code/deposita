@@ -83,6 +83,8 @@ Edite `.env` e configure:
 | `DEPOSITA_SECRET_KEY` | Sim | Chave aleatória, exclusiva e com pelo menos 32 caracteres para assinar JWTs. |
 | `DATABASE_URL` | Não | URL SQLAlchemy; o padrão local é `sqlite:///./deposita.db`. |
 | `CORS_ORIGINS` | Não | Origins do frontend separadas por vírgula. |
+| `DEMO_MODE` | Não | Ativa o login e o seed da demonstração; padrão `false`. |
+| `DEMO_USERNAME` | Não | Username `operator` usado pela demonstração; padrão `demo`. |
 
 Exemplo de CORS local: `http://localhost:5173,http://127.0.0.1:5173`.
 Variáveis já definidas no sistema operacional têm prioridade sobre valores do
@@ -117,6 +119,29 @@ python -m uvicorn app.main:app --reload
 ```
 
 A documentação interativa Swagger estará em [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+
+### Demonstração local
+
+Use um banco dedicado cujo nome contenha `demo`:
+
+```powershell
+$env:DEMO_MODE="true"
+$env:DEMO_USERNAME="demo"
+$env:DATABASE_URL="sqlite:///./deposita_demo.db"
+python -m alembic upgrade head
+python -m app.seed_demo
+python -m uvicorn app.main:app --reload
+```
+
+O reset é sempre explícito e não possui endpoint HTTP:
+
+```powershell
+python -m app.seed_demo --reset
+```
+
+Para o deploy, o comando `python -m app.start` aplica migrations, executa o
+reset/seed somente quando `DEMO_MODE=true` e inicia um único worker Uvicorn em
+`0.0.0.0:$PORT`. Qualquer falha de migration ou seed impede o servidor de subir.
 
 ## Autorização e auditoria
 

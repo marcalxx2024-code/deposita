@@ -5,6 +5,7 @@ import {
   listSuppliers,
   updateSupplier,
 } from '../services/suppliers.js'
+import { useAuth } from '../hooks/useAuth.js'
 import { formatDateTime } from '../utils/formatters.js'
 
 const pageSize = 20
@@ -20,6 +21,8 @@ function toSupplierForm(supplier) {
 }
 
 function SuppliersPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [suppliers, setSuppliers] = useState([])
   const [skip, setSkip] = useState(0)
   const [form, setForm] = useState(emptySupplier)
@@ -135,10 +138,10 @@ function SuppliersPage() {
     <div className="page">
       <div className="page-header">
         <div><span className="eyebrow">Rede de abastecimento</span><h1>Fornecedores</h1></div>
-        <button onClick={openNewSupplier} type="button">Novo fornecedor</button>
+        {isAdmin && <button onClick={openNewSupplier} type="button">Novo fornecedor</button>}
       </div>
 
-      {showForm && <form className="panel panel--operation form-grid" onSubmit={handleSubmit}>
+      {isAdmin && showForm && <form className="panel panel--operation form-grid" onSubmit={handleSubmit}>
         <h2>{editingSupplier ? 'Editar fornecedor' : 'Novo fornecedor'}</h2>
         <label>Nome<input maxLength="100" minLength="2" onChange={(event) => updateForm('name', event.target.value)} required value={form.name} /></label>
         <label>Contato<input maxLength="100" onChange={(event) => updateForm('contact_name', event.target.value)} value={form.contact_name} /></label>
@@ -162,7 +165,7 @@ function SuppliersPage() {
                   <td className="mobile-secondary" data-label="Telefone" id={`supplier-${supplier.id}-phone`}>{supplier.phone || '—'}</td>
                   <td className="mobile-secondary" data-label="Email" id={`supplier-${supplier.id}-email`}>{supplier.email || '—'}</td>
                   <td className="mobile-secondary" data-label="Criado em" id={`supplier-${supplier.id}-created`}><time dateTime={supplier.created_at}>{formatDateTime(supplier.created_at)}</time></td>
-                  <td data-label="Ações"><div className="inline-actions"><button aria-controls={`supplier-${supplier.id}-phone supplier-${supplier.id}-email supplier-${supplier.id}-created`} aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleSupplierDetails(supplier.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button><button className="button-secondary" disabled={deletingSupplierId === supplier.id} onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" disabled={deletingSupplierId === supplier.id} onClick={() => handleDelete(supplier)} type="button">{deletingSupplierId === supplier.id ? 'Excluindo...' : 'Excluir'}</button></div></td>
+                  <td data-label="Ações"><div className="inline-actions"><button aria-controls={`supplier-${supplier.id}-phone supplier-${supplier.id}-email supplier-${supplier.id}-created`} aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleSupplierDetails(supplier.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>{isAdmin && <><button className="button-secondary" disabled={deletingSupplierId === supplier.id} onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" disabled={deletingSupplierId === supplier.id} onClick={() => handleDelete(supplier)} type="button">{deletingSupplierId === supplier.id ? 'Excluindo...' : 'Excluir'}</button></>}</div></td>
                 </tr>
               )
             })}</tbody>

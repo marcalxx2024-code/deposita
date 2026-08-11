@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth.js'
+import { waitForApi } from '../services/health.js'
 
 function LoginPage() {
-  const { authenticated, login } = useAuth()
+  const { authenticated, login, loginDemo } = useAuth()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [preparingDemo, setPreparingDemo] = useState(false)
 
   if (authenticated) {
     return <Navigate to="/dashboard" replace />
@@ -25,6 +27,31 @@ function LoginPage() {
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível entrar.')
     } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleDemoLogin() {
+    setError('')
+    setSubmitting(true)
+    setPreparingDemo(true)
+
+    try {
+      const apiAvailable = await waitForApi()
+      if (!apiAvailable) {
+        throw new Error(
+          'A demonstração ainda não está disponível. Aguarde um momento e tente novamente.',
+        )
+      }
+      await loginDemo()
+      navigate('/dashboard', { replace: true })
+    } catch (requestError) {
+      setError(
+        requestError.message ||
+          'Não foi possível iniciar a demonstração. Aguarde um momento e tente novamente.',
+      )
+    } finally {
+      setPreparingDemo(false)
       setSubmitting(false)
     }
   }
@@ -73,8 +100,21 @@ function LoginPage() {
             />
           </label>
           {error && <p className="login-form__error" role="alert">{error}</p>}
+          {preparingDemo && (
+            <p aria-live="polite" className="state-message state-message--loading">
+              Preparando a demonstração. Isso pode levar alguns segundos.
+            </p>
+          )}
           <button disabled={submitting} type="submit">
             {submitting ? 'Entrando...' : 'Entrar no sistema'}
+          </button>
+          <button
+            className="button-secondary"
+            disabled={submitting}
+            onClick={handleDemoLogin}
+            type="button"
+          >
+            Entrar na demonstração
           </button>
         </form>
       </div>

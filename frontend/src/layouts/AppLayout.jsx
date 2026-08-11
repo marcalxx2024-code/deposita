@@ -11,7 +11,7 @@ const navigationItems = [
 ]
 
 function AppLayout() {
-  const { logout, user } = useAuth()
+  const { isDemo, logout, user } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -65,7 +65,13 @@ function AppLayout() {
           <div className="user-panel">
             <span aria-hidden="true" className="user-panel__indicator" />
             <span>
-              <small>Operador</small>
+              <small>
+                {isDemo
+                  ? 'Modo demonstração'
+                  : user?.role === 'admin'
+                    ? 'Administrador'
+                    : 'Operador'}
+              </small>
               <strong>{user?.username}</strong>
             </span>
           </div>

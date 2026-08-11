@@ -1,7 +1,7 @@
 import logging
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app import schemas
-from app.config import parse_cors_origins
+from app.config import get_demo_mode, get_demo_username, parse_cors_origins
 from app.database import engine, get_db, normalize_search_text
 from app.errors import (
     APIError,
@@ -245,6 +245,27 @@ def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
 
     if not verify_password(credentials.password, password_to_verify) or user is None:
         raise invalid_credentials_error()
+
+    return {
+        "access_token": create_access_token(str(user.id)),
+        "token_type": "bearer",
+    }
+
+
+@app.post("/auth/demo", response_model=schemas.TokenResponse)
+def demo_login(db: Session = Depends(get_db)):
+    if not get_demo_mode():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.username == get_demo_username())
+        .first()
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if user.role != models.UserRole.OPERATOR.value:
+        raise forbidden_error()
 
     return {
         "access_token": create_access_token(str(user.id)),

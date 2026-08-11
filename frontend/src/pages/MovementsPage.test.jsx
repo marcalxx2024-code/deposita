@@ -45,4 +45,13 @@ describe('MovementsPage', () => {
     expect(await screen.findByLabelText('Produto')).toHaveValue('3')
     expect(screen.getByLabelText('Tipo')).toHaveValue('entry')
   })
+
+  it('mantém os controles de entrada e saída disponíveis para operator', async () => {
+    render(<MemoryRouter><MovementsPage /></MemoryRouter>)
+
+    expect(await screen.findByLabelText('Tipo')).toHaveValue('entry')
+    expect(screen.getByRole('option', { name: 'Entrada' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Saída' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Registrar entrada' })).toBeInTheDocument()
+  })
 })
