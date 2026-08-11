@@ -28,6 +28,9 @@ export async function apiRequest(path, options = {}) {
     const error = new Error(message || 'Não foi possível concluir a solicitação.')
     error.status = response.status
     error.payload = payload
+    if (response.status === 401) {
+      window.dispatchEvent(new Event('deposita:unauthorized'))
+    }
     throw error
   }
 

@@ -14,6 +14,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let active = true
 
+    function handleUnauthorized() {
+      clearToken()
+      if (active) setUser(null)
+    }
+
     async function restoreSession() {
       if (!isAuthenticated()) {
         if (active) setLoading(false)
@@ -32,9 +37,11 @@ export function AuthProvider({ children }) {
     }
 
     restoreSession()
+    window.addEventListener('deposita:unauthorized', handleUnauthorized)
 
     return () => {
       active = false
+      window.removeEventListener('deposita:unauthorized', handleUnauthorized)
     }
   }, [])
 

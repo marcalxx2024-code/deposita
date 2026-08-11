@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth.js'
 import AppLayout from '../layouts/AppLayout.jsx'
+import DashboardPage from '../pages/DashboardPage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
 import PlaceholderPage from '../pages/PlaceholderPage.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
@@ -18,7 +19,7 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
-          <Route path="/dashboard" element={<PlaceholderPage title="Dashboard" />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/products" element={<PlaceholderPage title="Produtos" />} />
           <Route path="/movements" element={<PlaceholderPage title="Movimentações" />} />
           <Route path="/suppliers" element={<PlaceholderPage title="Fornecedores" />} />

@@ -62,11 +62,87 @@ button {
 .app-layout__header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
   justify-content: space-between;
   padding: 1rem;
   border-bottom: 1px solid #ddd;
 }
 
+.app-layout__nav,
+.app-layout__user {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.app-layout__nav a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-layout__nav a.is-active {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
 .app-layout__content {
   padding: 1.5rem;
+}
+
+.dashboard-page {
+  display: grid;
+  gap: 2rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 1rem;
+}
+
+.dashboard-card,
+.dashboard-section {
+  padding: 1rem;
+  border: 1px solid #ddd;
+  background: #fff;
+}
+
+.dashboard-card {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dashboard-card strong {
+  font-size: 1.5rem;
+}
+
+.dashboard-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.dashboard-section__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dashboard-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-list li {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.dashboard-error {
+  color: #a11;
 }
