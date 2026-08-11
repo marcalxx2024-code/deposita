@@ -217,14 +217,18 @@ def test_parse_cors_origins_returns_no_origins_for_empty_configuration():
 
 
 def test_cors_allows_configured_origin_only_and_never_returns_the_secret_key():
+    allowed_origins = ("http://localhost:5173", "http://127.0.0.1:5173")
     with TestClient(app) as client:
-        allowed_response = client.options(
-            "/products",
-            headers={
-                "Origin": "http://frontend.test",
-                "Access-Control-Request-Method": "GET",
-            },
-        )
+        allowed_responses = [
+            client.options(
+                "/products",
+                headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+            for origin in allowed_origins
+        ]
         denied_response = client.options(
             "/products",
             headers={
@@ -232,11 +236,12 @@ def test_cors_allows_configured_origin_only_and_never_returns_the_secret_key():
                 "Access-Control-Request-Method": "GET",
             },
         )
-        response = client.get("/health", headers={"Origin": "http://frontend.test"})
+        response = client.get("/health", headers={"Origin": allowed_origins[0]})
 
-    assert allowed_response.status_code == 200
-    assert allowed_response.headers["access-control-allow-origin"] == "http://frontend.test"
-    assert "access-control-allow-credentials" not in allowed_response.headers
+    for origin, allowed_response in zip(allowed_origins, allowed_responses):
+        assert allowed_response.status_code == 200
+        assert allowed_response.headers["access-control-allow-origin"] == origin
+        assert "access-control-allow-credentials" not in allowed_response.headers
     assert denied_response.status_code == 400
     assert "access-control-allow-origin" not in denied_response.headers
     assert response.status_code == 200

@@ -20,3 +20,53 @@ h1,
 p {
   margin: 0;
 }
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.loading-state,
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.login-form {
+  display: grid;
+  width: min(100%, 22rem);
+  gap: 1rem;
+}
+
+.login-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.login-form input,
+.login-form button,
+.app-layout__header button {
+  padding: 0.65rem 0.75rem;
+}
+
+.login-form__error {
+  color: #a11;
+}
+
+.app-layout__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.app-layout__content {
+  padding: 1.5rem;
+}

@@ -1,10 +1,12 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 
 # System environment variables take precedence over values in a local .env file.
-load_dotenv(override=False)
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(ENV_FILE, override=False)
 
 DEFAULT_DATABASE_URL = "sqlite:///./deposita.db"
 

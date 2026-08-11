@@ -25,7 +25,10 @@ export async function apiRequest(path, options = {}) {
 
   if (!response.ok) {
     const message = payload?.error?.message || payload?.detail || response.statusText
-    throw new Error(message || 'Não foi possível concluir a solicitação.')
+    const error = new Error(message || 'Não foi possível concluir a solicitação.')
+    error.status = response.status
+    error.payload = payload
+    throw error
   }
 
   return payload
