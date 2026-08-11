@@ -3,7 +3,9 @@ import { useAuth } from '../hooks/useAuth.js'
 import AppLayout from '../layouts/AppLayout.jsx'
 import DashboardPage from '../pages/DashboardPage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
+import MovementsPage from '../pages/MovementsPage.jsx'
 import PlaceholderPage from '../pages/PlaceholderPage.jsx'
+import ProductsPage from '../pages/ProductsPage.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
 
 function AppRoutes() {
@@ -20,8 +22,8 @@ function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/products" element={<PlaceholderPage title="Produtos" />} />
-          <Route path="/movements" element={<PlaceholderPage title="Movimentações" />} />
+          <Route path="/products" element={<ProductsPage />} />
+          <Route path="/movements" element={<MovementsPage />} />
           <Route path="/suppliers" element={<PlaceholderPage title="Fornecedores" />} />
           <Route path="/low-stock" element={<PlaceholderPage title="Estoque baixo" />} />
         </Route>
