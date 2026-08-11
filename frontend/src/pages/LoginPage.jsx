@@ -54,7 +54,7 @@ function LoginPage() {
             value={password}
           />
         </label>
-        {error && <p className="login-form__error">{error}</p>}
+        {error && <p className="login-form__error" role="alert">{error}</p>}
         <button disabled={submitting} type="submit">
           {submitting ? 'Entrando...' : 'Entrar'}
         </button>

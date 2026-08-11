@@ -78,8 +78,8 @@ function MovementsPage() {
       </form>
 
       {message && <p className="status-message">{message}</p>}
-      {error && <p className="error-message">{error}</p>}
-      {loading ? <p>Carregando...</p> : movements.length === 0 ? <p>Nenhuma movimentação encontrada.</p> : <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>Tipo</th><th>Quantidade</th><th>Produto</th><th>Data</th><th>Observação</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id}><td>{movement.movement_type === 'entry' ? 'Entrada' : 'Saída'}</td><td>{movement.quantity}</td><td>#{movement.product_id}</td><td>{formatDateTime(movement.created_at)}</td><td>{movement.note || '—'}</td></tr>)}</tbody></table></div>}
+      {error && <p className="error-message" role="alert">{error}</p>}
+      {loading ? <p>Carregando...</p> : movements.length === 0 ? <p>Nenhuma movimentação encontrada.</p> : <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>Tipo</th><th>Quantidade</th><th>Produto</th><th>Data</th><th>Observação</th></tr></thead><tbody>{movements.map((movement) => <tr className="movement-row" key={movement.id}><td data-label="Tipo">{movement.movement_type === 'entry' ? 'Entrada' : 'Saída'}</td><td data-label="Quantidade">{movement.quantity}</td><td data-label="Produto">#{movement.product_id}</td><td data-label="Data">{formatDateTime(movement.created_at)}</td><td data-label="Observação">{movement.note || '—'}</td></tr>)}</tbody></table></div>}
       <div className="pagination"><button disabled={skip === 0 || loading} onClick={() => setSkip((current) => Math.max(0, current - pageSize))} type="button">Anterior</button><span>Exibindo a partir do item {skip + 1}</span><button disabled={movements.length < pageSize || loading} onClick={() => setSkip((current) => current + pageSize)} type="button">Próxima</button></div>
     </div>
   )

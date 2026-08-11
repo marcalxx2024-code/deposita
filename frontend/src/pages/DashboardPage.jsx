@@ -40,7 +40,7 @@ function DashboardPage() {
   }
 
   if (error) {
-    return <p className="dashboard-error">{error}</p>
+    return <p className="dashboard-error" role="alert">{error}</p>
   }
 
   const { summary, lowStockProducts, recentMovements } = data

@@ -4,8 +4,9 @@ import AppLayout from '../layouts/AppLayout.jsx'
 import DashboardPage from '../pages/DashboardPage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
 import MovementsPage from '../pages/MovementsPage.jsx'
-import PlaceholderPage from '../pages/PlaceholderPage.jsx'
 import ProductsPage from '../pages/ProductsPage.jsx'
+import LowStockPage from '../pages/LowStockPage.jsx'
+import SuppliersPage from '../pages/SuppliersPage.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
 
 function AppRoutes() {
@@ -24,8 +25,8 @@ function AppRoutes() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/movements" element={<MovementsPage />} />
-          <Route path="/suppliers" element={<PlaceholderPage title="Fornecedores" />} />
-          <Route path="/low-stock" element={<PlaceholderPage title="Estoque baixo" />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
+          <Route path="/low-stock" element={<LowStockPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
