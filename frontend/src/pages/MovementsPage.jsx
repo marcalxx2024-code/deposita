@@ -14,6 +14,7 @@ function MovementsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [expandedMovementIds, setExpandedMovementIds] = useState(new Set())
 
   const loadMovements = useCallback(async () => {
     setLoading(true)
@@ -43,6 +44,15 @@ function MovementsPage() {
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
+
+  function toggleMovementDetails(movementId) {
+    setExpandedMovementIds((current) => {
+      const next = new Set(current)
+      if (next.has(movementId)) next.delete(movementId)
+      else next.add(movementId)
+      return next
+    })
+  }
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -79,7 +89,7 @@ function MovementsPage() {
 
       {message && <p className="status-message">{message}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
-      {loading ? <p>Carregando...</p> : movements.length === 0 ? <p>Nenhuma movimentação encontrada.</p> : <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>Tipo</th><th>Quantidade</th><th>Produto</th><th>Data</th><th>Observação</th></tr></thead><tbody>{movements.map((movement) => <tr className="movement-row" key={movement.id}><td data-label="Tipo">{movement.movement_type === 'entry' ? 'Entrada' : 'Saída'}</td><td data-label="Quantidade">{movement.quantity}</td><td data-label="Produto">#{movement.product_id}</td><td data-label="Data">{formatDateTime(movement.created_at)}</td><td data-label="Observação">{movement.note || '—'}</td></tr>)}</tbody></table></div>}
+      {loading ? <p>Carregando...</p> : movements.length === 0 ? <p>Nenhuma movimentação encontrada.</p> : <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>Tipo</th><th>Quantidade</th><th>Produto</th><th>Data</th><th>Observação</th></tr></thead><tbody>{movements.map((movement) => { const detailsExpanded = expandedMovementIds.has(movement.id); return <tr className={`movement-row ${detailsExpanded ? 'is-expanded' : ''}`} key={movement.id}><td data-label="Tipo">{movement.movement_type === 'entry' ? 'Entrada' : 'Saída'}</td><td data-label="Quantidade">{movement.quantity}</td><td data-label="Produto">#{movement.product_id}</td><td data-label="Data">{formatDateTime(movement.created_at)}</td><td className="mobile-details-cell" data-label="Observação"><span className="mobile-secondary-content">{movement.note || '—'}</span>{movement.note && <button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleMovementDetails(movement.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>}</td></tr> })}</tbody></table></div>}
       <div className="pagination"><button disabled={skip === 0 || loading} onClick={() => setSkip((current) => Math.max(0, current - pageSize))} type="button">Anterior</button><span>Exibindo a partir do item {skip + 1}</span><button disabled={movements.length < pageSize || loading} onClick={() => setSkip((current) => current + pageSize)} type="button">Próxima</button></div>
     </div>
   )

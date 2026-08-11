@@ -29,6 +29,7 @@ function SuppliersPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [expandedSupplierIds, setExpandedSupplierIds] = useState(new Set())
 
   const loadSuppliers = useCallback(async () => {
     setLoading(true)
@@ -70,6 +71,15 @@ function SuppliersPage() {
     setEditingSupplier(null)
     setForm(emptySupplier)
     setShowForm(false)
+  }
+
+  function toggleSupplierDetails(supplierId) {
+    setExpandedSupplierIds((current) => {
+      const next = new Set(current)
+      if (next.has(supplierId)) next.delete(supplierId)
+      else next.add(supplierId)
+      return next
+    })
   }
 
   async function handleSubmit(event) {
@@ -130,7 +140,7 @@ function SuppliersPage() {
 
       {message && <p className="status-message">{message}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
-      {loading ? <p>Carregando...</p> : suppliers.length === 0 ? <p>Nenhum fornecedor encontrado.</p> : <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>Nome</th><th>Contato</th><th>Telefone</th><th>Email</th><th>Criado em</th><th>Ações</th></tr></thead><tbody>{suppliers.map((supplier) => <tr className="supplier-row" key={supplier.id}><td data-label="Nome">{supplier.name}</td><td data-label="Contato">{supplier.contact_name || '—'}</td><td data-label="Telefone">{supplier.phone || '—'}</td><td data-label="Email">{supplier.email || '—'}</td><td data-label="Criado em">{formatDateTime(supplier.created_at)}</td><td data-label="Ações"><div className="inline-actions"><button onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" onClick={() => handleDelete(supplier)} type="button">Excluir</button></div></td></tr>)}</tbody></table></div>}
+      {loading ? <p>Carregando...</p> : suppliers.length === 0 ? <p>Nenhum fornecedor encontrado.</p> : <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>Nome</th><th>Contato</th><th>Telefone</th><th>Email</th><th>Criado em</th><th>Ações</th></tr></thead><tbody>{suppliers.map((supplier) => { const detailsExpanded = expandedSupplierIds.has(supplier.id); return <tr className={`supplier-row ${detailsExpanded ? 'is-expanded' : ''}`} key={supplier.id}><td data-label="Nome">{supplier.name}</td><td data-label="Contato">{supplier.contact_name || '—'}</td><td className="mobile-secondary" data-label="Telefone">{supplier.phone || '—'}</td><td className="mobile-secondary" data-label="Email">{supplier.email || '—'}</td><td className="mobile-secondary" data-label="Criado em">{formatDateTime(supplier.created_at)}</td><td data-label="Ações"><div className="inline-actions"><button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleSupplierDetails(supplier.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button><button onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" onClick={() => handleDelete(supplier)} type="button">Excluir</button></div></td></tr> })}</tbody></table></div>}
       <div className="pagination"><button disabled={skip === 0 || loading} onClick={() => setSkip((current) => Math.max(0, current - pageSize))} type="button">Anterior</button><span>Exibindo a partir do item {skip + 1}</span><button disabled={suppliers.length < pageSize || loading} onClick={() => setSkip((current) => current + pageSize)} type="button">Próxima</button></div>
     </div>
   )

@@ -185,6 +185,11 @@ textarea {
   background: #a11;
 }
 
+.mobile-details-toggle,
+.mobile-quantity-summary {
+  display: none;
+}
+
 .page,
 .dashboard-page {
   display: grid;
@@ -390,9 +395,9 @@ textarea {
 
   .data-table tr {
     display: grid;
-    gap: 0.35rem;
+    gap: 0.2rem;
     margin-bottom: 1rem;
-    padding: 1rem;
+    padding: 0.75rem;
     border: 1px solid #ddd;
     border-radius: 0.35rem;
     background: #fff;
@@ -401,8 +406,8 @@ textarea {
   .data-table td {
     display: grid;
     grid-template-columns: minmax(7rem, 40%) 1fr;
-    gap: 0.75rem;
-    padding: 0.25rem 0;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
     border: 0;
     overflow-wrap: anywhere;
   }
@@ -422,6 +427,44 @@ textarea {
   .data-table td[data-label="Ações"]::before {
     display: block;
     margin-bottom: 0.5rem;
+  }
+
+  .desktop-only-cell,
+  .data-table td.mobile-secondary {
+    display: none;
+  }
+
+  .data-table tr.is-expanded td.mobile-secondary {
+    display: grid;
+  }
+
+  .mobile-quantity-summary {
+    display: inline;
+  }
+
+  .mobile-details-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.5rem;
+  }
+
+  .data-table td.mobile-details-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .data-table td.mobile-details-cell::before,
+  .mobile-details-cell .mobile-secondary-content {
+    display: none;
+  }
+
+  .data-table tr.is-expanded td.mobile-details-cell::before {
+    display: inline;
+  }
+
+  .data-table tr.is-expanded .mobile-details-cell .mobile-secondary-content {
+    display: inline;
   }
 
   .product-row td[data-label="Nome"],

@@ -41,6 +41,7 @@ function ProductsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [expandedProductIds, setExpandedProductIds] = useState(new Set())
 
   const loadProducts = useCallback(async () => {
     setLoading(true)
@@ -94,6 +95,15 @@ function ProductsPage() {
     setShowForm(false)
     setEditingProduct(null)
     setForm(emptyProduct)
+  }
+
+  function toggleProductDetails(productId) {
+    setExpandedProductIds((current) => {
+      const next = new Set(current)
+      if (next.has(productId)) next.delete(productId)
+      else next.add(productId)
+      return next
+    })
   }
 
   async function handleProductSubmit(event) {
@@ -188,7 +198,7 @@ function ProductsPage() {
       {error && <p className="error-message" role="alert">{error}</p>}
       {loading ? <p>Carregando...</p> : productsData?.items.length === 0 ? <p>Nenhum produto encontrado.</p> : (
         <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>SKU</th><th>Nome</th><th>Categoria</th><th>Quantidade</th><th>Mínimo</th><th>Preço</th><th>Fornecedor</th><th>Status</th><th>Ações</th></tr></thead><tbody>
-          {productsData?.items.map((product) => <tr className="product-row" key={product.id}><td data-label="SKU">{product.sku}</td><td data-label="Nome">{product.name}</td><td data-label="Categoria">{product.category}</td><td data-label="Quantidade">{product.quantity}</td><td data-label="Mínimo">{product.minimum_quantity}</td><td data-label="Preço">{product.price}</td><td data-label="Fornecedor">{product.supplier_id ?? '—'}</td><td data-label="Status">{product.is_active ? 'Ativo' : 'Inativo'}</td><td data-label="Ações"><div className="inline-actions">{product.is_active ? <><button onClick={() => openEditProduct(product)} type="button">Editar</button><button className="button-danger" onClick={() => handleDeactivate(product)} type="button">Inativar</button></> : <button onClick={() => handleReactivate(product)} type="button">Reativar</button>}</div></td></tr>)}
+          {productsData?.items.map((product) => { const detailsExpanded = expandedProductIds.has(product.id); return <tr className={`product-row ${detailsExpanded ? 'is-expanded' : ''}`} key={product.id}><td data-label="SKU">{product.sku}</td><td data-label="Nome">{product.name}</td><td className="mobile-secondary" data-label="Categoria">{product.category}</td><td data-label="Quantidade"><span className="desktop-only-cell">{product.quantity}</span><span className="mobile-quantity-summary">{product.quantity} (mínimo: {product.minimum_quantity})</span></td><td className="desktop-only-cell" data-label="Mínimo">{product.minimum_quantity}</td><td className="mobile-secondary" data-label="Preço">{product.price}</td><td className="mobile-secondary" data-label="Fornecedor">{product.supplier_id ?? '—'}</td><td data-label="Status">{product.is_active ? 'Ativo' : 'Inativo'}</td><td data-label="Ações"><div className="inline-actions"><button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>{product.is_active ? <><button onClick={() => openEditProduct(product)} type="button">Editar</button><button className="button-danger" onClick={() => handleDeactivate(product)} type="button">Inativar</button></> : <button onClick={() => handleReactivate(product)} type="button">Reativar</button>}</div></td></tr> })}
         </tbody></table></div>
       )}
 
