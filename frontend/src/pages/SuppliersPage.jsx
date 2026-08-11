@@ -127,20 +127,42 @@ function SuppliersPage() {
 
   return (
     <div className="page">
-      <div className="page-header"><h1>Fornecedores</h1><button onClick={openNewSupplier} type="button">Novo fornecedor</button></div>
+      <div className="page-header">
+        <div><span className="eyebrow">Rede de abastecimento</span><h1>Fornecedores</h1></div>
+        <button onClick={openNewSupplier} type="button">Novo fornecedor</button>
+      </div>
 
-      {showForm && <form className="panel form-grid" onSubmit={handleSubmit}>
+      {showForm && <form className="panel panel--operation form-grid" onSubmit={handleSubmit}>
         <h2>{editingSupplier ? 'Editar fornecedor' : 'Novo fornecedor'}</h2>
         <label>Nome<input maxLength="100" minLength="2" onChange={(event) => updateForm('name', event.target.value)} required value={form.name} /></label>
         <label>Contato<input maxLength="100" onChange={(event) => updateForm('contact_name', event.target.value)} value={form.contact_name} /></label>
         <label>Telefone<input maxLength="30" onChange={(event) => updateForm('phone', event.target.value)} value={form.phone} /></label>
         <label>Email<input maxLength="255" onChange={(event) => updateForm('email', event.target.value)} type="email" value={form.email} /></label>
-        <div className="form-actions"><button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button><button disabled={saving} onClick={closeForm} type="button">Cancelar</button></div>
+        <div className="form-actions"><button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button><button className="button-secondary" disabled={saving} onClick={closeForm} type="button">Cancelar</button></div>
       </form>}
 
-      {message && <p className="status-message">{message}</p>}
+      {message && <p aria-live="polite" className="status-message">{message}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
-      {loading ? <p>Carregando...</p> : suppliers.length === 0 ? <p>Nenhum fornecedor encontrado.</p> : <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>Nome</th><th>Contato</th><th>Telefone</th><th>Email</th><th>Criado em</th><th>Ações</th></tr></thead><tbody>{suppliers.map((supplier) => { const detailsExpanded = expandedSupplierIds.has(supplier.id); return <tr className={`supplier-row ${detailsExpanded ? 'is-expanded' : ''}`} key={supplier.id}><td data-label="Nome">{supplier.name}</td><td data-label="Contato">{supplier.contact_name || '—'}</td><td className="mobile-secondary" data-label="Telefone">{supplier.phone || '—'}</td><td className="mobile-secondary" data-label="Email">{supplier.email || '—'}</td><td className="mobile-secondary" data-label="Criado em">{formatDateTime(supplier.created_at)}</td><td data-label="Ações"><div className="inline-actions"><button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleSupplierDetails(supplier.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button><button onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" onClick={() => handleDelete(supplier)} type="button">Excluir</button></div></td></tr> })}</tbody></table></div>}
+      {loading ? <p aria-live="polite" className="state-message state-message--loading">Carregando fornecedores...</p> : suppliers.length === 0 ? <p className="state-message state-message--empty">Nenhum fornecedor encontrado.</p> : (
+        <div className="data-table-wrapper">
+          <table className="data-table supplier-table">
+            <thead><tr><th>Nome</th><th>Contato</th><th>Telefone</th><th>Email</th><th>Criado em</th><th>Ações</th></tr></thead>
+            <tbody>{suppliers.map((supplier) => {
+              const detailsExpanded = expandedSupplierIds.has(supplier.id)
+              return (
+                <tr className={`supplier-row ${detailsExpanded ? 'is-expanded' : ''}`} key={supplier.id}>
+                  <td data-label="Nome"><strong>{supplier.name}</strong></td>
+                  <td data-label="Contato"><span className="contact-value">{supplier.contact_name || '—'}</span></td>
+                  <td className="mobile-secondary" data-label="Telefone">{supplier.phone || '—'}</td>
+                  <td className="mobile-secondary" data-label="Email">{supplier.email || '—'}</td>
+                  <td className="mobile-secondary" data-label="Criado em"><time dateTime={supplier.created_at}>{formatDateTime(supplier.created_at)}</time></td>
+                  <td data-label="Ações"><div className="inline-actions"><button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleSupplierDetails(supplier.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button><button className="button-secondary" onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" onClick={() => handleDelete(supplier)} type="button">Excluir</button></div></td>
+                </tr>
+              )
+            })}</tbody>
+          </table>
+        </div>
+      )}
       <div className="pagination"><button disabled={skip === 0 || loading} onClick={() => setSkip((current) => Math.max(0, current - pageSize))} type="button">Anterior</button><span>Exibindo a partir do item {skip + 1}</span><button disabled={suppliers.length < pageSize || loading} onClick={() => setSkip((current) => current + pageSize)} type="button">Próxima</button></div>
     </div>
   )

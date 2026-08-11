@@ -168,20 +168,24 @@ function ProductsPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Produtos</h1>
+        <div>
+          <span className="eyebrow">Catálogo de inventário</span>
+          <h1>Produtos</h1>
+        </div>
         <button type="button" onClick={openNewProduct}>Novo produto</button>
       </div>
 
-      <form className="panel form-grid" onSubmit={handleFilterSubmit}>
+      <form className="panel panel--filters form-grid" onSubmit={handleFilterSubmit}>
+        <h2 className="panel-title">Filtros</h2>
         <label>Busca<input value={filters.search} onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))} /></label>
         <label>Categoria<input value={filters.category} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))} /></label>
         <label className="checkbox-field"><input checked={filters.low_stock} onChange={(event) => setFilters((current) => ({ ...current, low_stock: event.target.checked }))} type="checkbox" />Estoque baixo</label>
         <label className="checkbox-field"><input checked={filters.include_inactive} onChange={(event) => setFilters((current) => ({ ...current, include_inactive: event.target.checked }))} type="checkbox" />Incluir inativos</label>
-        <div className="form-actions"><button type="submit">Filtrar</button></div>
+        <div className="form-actions"><button className="button-secondary" type="submit">Aplicar filtros</button></div>
       </form>
 
       {showForm && (
-        <form className="panel form-grid" onSubmit={handleProductSubmit}>
+        <form className="panel panel--operation form-grid" onSubmit={handleProductSubmit}>
           <h2>{editingProduct ? 'Editar produto' : 'Novo produto'}</h2>
           <label>SKU<input maxLength="64" onChange={(event) => updateForm('sku', event.target.value)} required value={form.sku} /></label>
           <label>Nome<input maxLength="100" minLength="2" onChange={(event) => updateForm('name', event.target.value)} required value={form.name} /></label>
@@ -190,16 +194,53 @@ function ProductsPage() {
           <label>Estoque mínimo<input min="0" onChange={(event) => updateForm('minimum_quantity', event.target.value)} required type="number" value={form.minimum_quantity} /></label>
           <label>Preço<input min="0" onChange={(event) => updateForm('price', event.target.value)} required step="0.01" type="number" value={form.price} /></label>
           <label>Fornecedor (ID opcional)<input min="1" onChange={(event) => updateForm('supplier_id', event.target.value)} type="number" value={form.supplier_id} /></label>
-          <div className="form-actions"><button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button><button disabled={saving} onClick={closeForm} type="button">Cancelar</button></div>
+          <div className="form-actions">
+            <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
+            <button className="button-secondary" disabled={saving} onClick={closeForm} type="button">Cancelar</button>
+          </div>
         </form>
       )}
 
-      {message && <p className="status-message">{message}</p>}
+      {message && <p aria-live="polite" className="status-message">{message}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
-      {loading ? <p>Carregando...</p> : productsData?.items.length === 0 ? <p>Nenhum produto encontrado.</p> : (
-        <div className="data-table-wrapper"><table className="data-table"><thead><tr><th>SKU</th><th>Nome</th><th>Categoria</th><th>Quantidade</th><th>Mínimo</th><th>Preço</th><th>Fornecedor</th><th>Status</th><th>Ações</th></tr></thead><tbody>
-          {productsData?.items.map((product) => { const detailsExpanded = expandedProductIds.has(product.id); return <tr className={`product-row ${detailsExpanded ? 'is-expanded' : ''}`} key={product.id}><td data-label="SKU">{product.sku}</td><td data-label="Nome">{product.name}</td><td className="mobile-secondary" data-label="Categoria">{product.category}</td><td data-label="Quantidade"><span className="desktop-only-cell">{product.quantity}</span><span className="mobile-quantity-summary">{product.quantity} (mínimo: {product.minimum_quantity})</span></td><td className="desktop-only-cell" data-label="Mínimo">{product.minimum_quantity}</td><td className="mobile-secondary" data-label="Preço">{product.price}</td><td className="mobile-secondary" data-label="Fornecedor">{product.supplier_id ?? '—'}</td><td data-label="Status">{product.is_active ? 'Ativo' : 'Inativo'}</td><td data-label="Ações"><div className="inline-actions"><button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>{product.is_active ? <><button onClick={() => openEditProduct(product)} type="button">Editar</button><button className="button-danger" onClick={() => handleDeactivate(product)} type="button">Inativar</button></> : <button onClick={() => handleReactivate(product)} type="button">Reativar</button>}</div></td></tr> })}
-        </tbody></table></div>
+      {loading ? <p aria-live="polite" className="state-message state-message--loading">Carregando produtos...</p> : productsData?.items.length === 0 ? <p className="state-message state-message--empty">Nenhum produto encontrado.</p> : (
+        <div className="data-table-wrapper">
+          <table className="data-table inventory-table">
+            <thead><tr><th>SKU</th><th>Nome</th><th>Categoria</th><th>Quantidade</th><th>Mínimo</th><th>Preço</th><th>Fornecedor</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>
+              {productsData?.items.map((product) => {
+                const detailsExpanded = expandedProductIds.has(product.id)
+                const lowStock = product.quantity <= product.minimum_quantity
+                return (
+                  <tr className={`product-row ${detailsExpanded ? 'is-expanded' : ''}`} key={product.id}>
+                    <td data-label="SKU"><span className="sku-code">{product.sku}</span></td>
+                    <td data-label="Nome"><strong>{product.name}</strong></td>
+                    <td className="mobile-secondary" data-label="Categoria">{product.category}</td>
+                    <td data-label="Quantidade">
+                      <span className={`quantity-value ${lowStock ? 'is-low' : ''}`}>{product.quantity}</span>
+                      <span className="mobile-quantity-summary"> atual · mínimo {product.minimum_quantity}</span>
+                    </td>
+                    <td className="desktop-only-cell" data-label="Mínimo">{product.minimum_quantity}</td>
+                    <td className="mobile-secondary" data-label="Preço">{product.price}</td>
+                    <td className="mobile-secondary" data-label="Fornecedor">{product.supplier_id ?? '—'}</td>
+                    <td data-label="Status"><span className={`status-badge ${product.is_active ? 'status-badge--active' : 'status-badge--inactive'}`}>{product.is_active ? 'Ativo' : 'Inativo'}</span></td>
+                    <td data-label="Ações">
+                      <div className="inline-actions">
+                        <button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>
+                        {product.is_active ? (
+                          <>
+                            <button className="button-secondary" onClick={() => openEditProduct(product)} type="button">Editar</button>
+                            <button className="button-danger" onClick={() => handleDeactivate(product)} type="button">Inativar</button>
+                          </>
+                        ) : <button className="button-positive" onClick={() => handleReactivate(product)} type="button">Reativar</button>}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {productsData && <div className="pagination"><button disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button">Anterior</button><span>Página {productsData.page} de {productsData.pages}</span><button disabled={page >= productsData.pages || loading} onClick={() => setPage((current) => current + 1)} type="button">Próxima</button></div>}
