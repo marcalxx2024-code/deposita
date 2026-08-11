@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createProduct,
   deactivateProduct,
@@ -6,6 +6,8 @@ import {
   reactivateProduct,
   updateProduct,
 } from '../services/products.js'
+import { listSuppliers } from '../services/suppliers.js'
+import { formatCurrency } from '../utils/formatters.js'
 
 const emptyProduct = {
   name: '',
@@ -31,6 +33,7 @@ function toProductForm(product) {
 
 function ProductsPage() {
   const [productsData, setProductsData] = useState(null)
+  const [suppliers, setSuppliers] = useState([])
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState({ search: '', category: '', low_stock: false, include_inactive: false })
   const [appliedFilters, setAppliedFilters] = useState({})
@@ -39,7 +42,10 @@ function ProductsPage() {
   const [showForm, setShowForm] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [loadingSuppliers, setLoadingSuppliers] = useState(true)
+  const [processingProductId, setProcessingProductId] = useState(null)
   const [error, setError] = useState('')
+  const [supplierError, setSupplierError] = useState('')
   const [message, setMessage] = useState('')
   const [expandedProductIds, setExpandedProductIds] = useState(new Set())
 
@@ -59,6 +65,31 @@ function ProductsPage() {
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
+
+  useEffect(() => {
+    let active = true
+
+    async function loadSupplierOptions() {
+      try {
+        const data = await listSuppliers({ skip: 0, limit: 100 })
+        if (active) setSuppliers(data)
+      } catch (requestError) {
+        if (active) setSupplierError(requestError.message || 'Não foi possível carregar os fornecedores.')
+      } finally {
+        if (active) setLoadingSuppliers(false)
+      }
+    }
+
+    loadSupplierOptions()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const supplierNames = useMemo(
+    () => new Map(suppliers.map((supplier) => [supplier.id, supplier.name])),
+    [suppliers],
+  )
 
   function updateForm(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -122,6 +153,8 @@ function ProductsPage() {
     }
     if (!editingProduct) productData.quantity = Number(form.quantity)
 
+    const shouldResetPage = !editingProduct && page !== 1
+
     try {
       if (editingProduct) {
         await updateProduct(editingProduct.id, productData)
@@ -132,7 +165,7 @@ function ProductsPage() {
         setPage(1)
       }
       closeForm()
-      await loadProducts()
+      if (!shouldResetPage) await loadProducts()
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível salvar o produto.')
     } finally {
@@ -144,24 +177,30 @@ function ProductsPage() {
     if (!window.confirm(`Inativar o produto ${product.name}?`)) return
     setError('')
     setMessage('')
+    setProcessingProductId(product.id)
     try {
       await deactivateProduct(product.id)
       setMessage('Produto inativado com sucesso.')
       await loadProducts()
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível inativar o produto.')
+    } finally {
+      setProcessingProductId(null)
     }
   }
 
   async function handleReactivate(product) {
     setError('')
     setMessage('')
+    setProcessingProductId(product.id)
     try {
       await reactivateProduct(product.id)
       setMessage('Produto reativado com sucesso.')
       await loadProducts()
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível reativar o produto.')
+    } finally {
+      setProcessingProductId(null)
     }
   }
 
@@ -193,7 +232,14 @@ function ProductsPage() {
           {!editingProduct && <label>Quantidade<input min="0" onChange={(event) => updateForm('quantity', event.target.value)} required type="number" value={form.quantity} /></label>}
           <label>Estoque mínimo<input min="0" onChange={(event) => updateForm('minimum_quantity', event.target.value)} required type="number" value={form.minimum_quantity} /></label>
           <label>Preço<input min="0" onChange={(event) => updateForm('price', event.target.value)} required step="0.01" type="number" value={form.price} /></label>
-          <label>Fornecedor (ID opcional)<input min="1" onChange={(event) => updateForm('supplier_id', event.target.value)} type="number" value={form.supplier_id} /></label>
+          <label>
+            Fornecedor
+            <select disabled={saving || loadingSuppliers} onChange={(event) => updateForm('supplier_id', event.target.value)} value={form.supplier_id}>
+              <option value="">Sem fornecedor</option>
+              {form.supplier_id && !supplierNames.has(Number(form.supplier_id)) && <option value={form.supplier_id}>Fornecedor atual indisponível</option>}
+              {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+            </select>
+          </label>
           <div className="form-actions">
             <button disabled={saving} type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
             <button className="button-secondary" disabled={saving} onClick={closeForm} type="button">Cancelar</button>
@@ -203,6 +249,7 @@ function ProductsPage() {
 
       {message && <p aria-live="polite" className="status-message">{message}</p>}
       {error && <p className="error-message" role="alert">{error}</p>}
+      {supplierError && <p className="error-message" role="alert">{supplierError}</p>}
       {loading ? <p aria-live="polite" className="state-message state-message--loading">Carregando produtos...</p> : productsData?.items.length === 0 ? <p className="state-message state-message--empty">Nenhum produto encontrado.</p> : (
         <div className="data-table-wrapper">
           <table className="data-table inventory-table">
@@ -215,24 +262,24 @@ function ProductsPage() {
                   <tr className={`product-row ${detailsExpanded ? 'is-expanded' : ''}`} key={product.id}>
                     <td data-label="SKU"><span className="sku-code">{product.sku}</span></td>
                     <td data-label="Nome"><strong>{product.name}</strong></td>
-                    <td className="mobile-secondary" data-label="Categoria">{product.category}</td>
+                    <td className="mobile-secondary" data-label="Categoria" id={`product-${product.id}-category`}>{product.category}</td>
                     <td data-label="Quantidade">
                       <span className={`quantity-value ${lowStock ? 'is-low' : ''}`}>{product.quantity}</span>
                       <span className="mobile-quantity-summary"> atual · mínimo {product.minimum_quantity}</span>
                     </td>
                     <td className="desktop-only-cell" data-label="Mínimo">{product.minimum_quantity}</td>
-                    <td className="mobile-secondary" data-label="Preço">{product.price}</td>
-                    <td className="mobile-secondary" data-label="Fornecedor">{product.supplier_id ?? '—'}</td>
+                    <td className="mobile-secondary" data-label="Preço" id={`product-${product.id}-price`}>{formatCurrency(product.price)}</td>
+                    <td className="mobile-secondary" data-label="Fornecedor" id={`product-${product.id}-supplier`}>{product.supplier_id === null ? 'Sem fornecedor' : supplierNames.get(product.supplier_id) || 'Fornecedor indisponível'}</td>
                     <td data-label="Status"><span className={`status-badge ${product.is_active ? 'status-badge--active' : 'status-badge--inactive'}`}>{product.is_active ? 'Ativo' : 'Inativo'}</span></td>
                     <td data-label="Ações">
                       <div className="inline-actions">
-                        <button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>
+                        <button aria-controls={`product-${product.id}-category product-${product.id}-price product-${product.id}-supplier`} aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>
                         {product.is_active ? (
                           <>
-                            <button className="button-secondary" onClick={() => openEditProduct(product)} type="button">Editar</button>
-                            <button className="button-danger" onClick={() => handleDeactivate(product)} type="button">Inativar</button>
+                            <button className="button-secondary" disabled={processingProductId === product.id} onClick={() => openEditProduct(product)} type="button">Editar</button>
+                            <button className="button-danger" disabled={processingProductId === product.id} onClick={() => handleDeactivate(product)} type="button">{processingProductId === product.id ? 'Inativando...' : 'Inativar'}</button>
                           </>
-                        ) : <button className="button-positive" onClick={() => handleReactivate(product)} type="button">Reativar</button>}
+                        ) : <button className="button-positive" disabled={processingProductId === product.id} onClick={() => handleReactivate(product)} type="button">{processingProductId === product.id ? 'Reativando...' : 'Reativar'}</button>}
                       </div>
                     </td>
                   </tr>

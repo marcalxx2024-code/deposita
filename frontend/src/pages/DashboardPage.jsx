@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getDashboardSummary } from '../services/dashboard.js'
 import { getRecentMovements } from '../services/movements.js'
-import { getLowStockProducts } from '../services/products.js'
+import { getLowStockProducts, listProducts } from '../services/products.js'
 import { formatDateTime } from '../utils/formatters.js'
 
 function DashboardPage() {
@@ -15,12 +15,16 @@ function DashboardPage() {
 
     async function loadDashboard() {
       try {
-        const [summary, lowStockProducts, recentMovements] = await Promise.all([
+        const [summary, lowStockProducts, recentMovements, productsData] = await Promise.all([
           getDashboardSummary(),
           getLowStockProducts({ skip: 0, limit: 5 }),
           getRecentMovements({ skip: 0, limit: 5 }),
+          listProducts({ page: 1, pageSize: 100, include_inactive: true }).catch(() => ({ items: [] })),
         ])
-        if (active) setData({ summary, lowStockProducts, recentMovements })
+        if (active) {
+          const productNames = new Map(productsData.items.map((product) => [product.id, product.name]))
+          setData({ summary, lowStockProducts, recentMovements, productNames })
+        }
       } catch (requestError) {
         if (active) setError(requestError.message || 'Não foi possível carregar o dashboard.')
       } finally {
@@ -43,7 +47,7 @@ function DashboardPage() {
     return <p className="dashboard-error" role="alert">{error}</p>
   }
 
-  const { summary, lowStockProducts, recentMovements } = data
+  const { summary, lowStockProducts, recentMovements, productNames } = data
 
   return (
     <div className="dashboard-page">
@@ -51,7 +55,7 @@ function DashboardPage() {
         <div>
           <span className="eyebrow">Central de operações</span>
           <h1>Dashboard</h1>
-          <p>Visão geral do seu depósito em tempo real.</p>
+          <p>Visão geral atual do seu depósito.</p>
         </div>
         <div aria-hidden="true" className="warehouse-scene">
           <span className="warehouse-scene__shelf warehouse-scene__shelf--one" />
@@ -131,7 +135,7 @@ function DashboardPage() {
                   <span aria-hidden="true" className="movement-sign">{isEntry ? '+' : '−'}</span>
                   <span className="dashboard-list__primary">
                     <strong>{isEntry ? 'Entrada' : 'Saída'} de {movement.quantity}</strong>
-                    <span>Produto #{movement.product_id}{movement.note ? ` · ${movement.note}` : ''}</span>
+                    <span>{productNames.get(movement.product_id) || `Produto indisponível (ref. ${movement.product_id})`}{movement.note ? ` · ${movement.note}` : ''}</span>
                   </span>
                   <time dateTime={movement.created_at}>{formatDateTime(movement.created_at)}</time>
                 </li>

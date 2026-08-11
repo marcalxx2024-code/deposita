@@ -17,6 +17,10 @@ export function listProducts({ page = 1, pageSize = 20, ...filters } = {}) {
   return authenticatedRequest(`/products?${params}`)
 }
 
+export function getProduct(productId) {
+  return authenticatedRequest(`/products/${productId}`)
+}
+
 export function getLowStockProducts({ skip = 0, limit = 5 } = {}) {
   const params = new URLSearchParams({ skip: String(skip), limit: String(limit) })
   return authenticatedRequest(`/products/low-stock?${params}`)

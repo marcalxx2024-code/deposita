@@ -27,6 +27,7 @@ function SuppliersPage() {
   const [showForm, setShowForm] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deletingSupplierId, setDeletingSupplierId] = useState(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [expandedSupplierIds, setExpandedSupplierIds] = useState(new Set())
@@ -94,6 +95,8 @@ function SuppliersPage() {
       email: form.email || null,
     }
 
+    const shouldResetPagination = !editingSupplier && skip !== 0
+
     try {
       if (editingSupplier) {
         await updateSupplier(editingSupplier.id, supplierData)
@@ -104,7 +107,7 @@ function SuppliersPage() {
         setSkip(0)
       }
       closeForm()
-      await loadSuppliers()
+      if (!shouldResetPagination) await loadSuppliers()
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível salvar o fornecedor.')
     } finally {
@@ -116,12 +119,15 @@ function SuppliersPage() {
     if (!window.confirm(`Excluir o fornecedor ${supplier.name}?`)) return
     setError('')
     setMessage('')
+    setDeletingSupplierId(supplier.id)
     try {
       await deleteSupplier(supplier.id)
       setMessage('Fornecedor excluído com sucesso.')
       await loadSuppliers()
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível excluir o fornecedor.')
+    } finally {
+      setDeletingSupplierId(null)
     }
   }
 
@@ -153,10 +159,10 @@ function SuppliersPage() {
                 <tr className={`supplier-row ${detailsExpanded ? 'is-expanded' : ''}`} key={supplier.id}>
                   <td data-label="Nome"><strong>{supplier.name}</strong></td>
                   <td data-label="Contato"><span className="contact-value">{supplier.contact_name || '—'}</span></td>
-                  <td className="mobile-secondary" data-label="Telefone">{supplier.phone || '—'}</td>
-                  <td className="mobile-secondary" data-label="Email">{supplier.email || '—'}</td>
-                  <td className="mobile-secondary" data-label="Criado em"><time dateTime={supplier.created_at}>{formatDateTime(supplier.created_at)}</time></td>
-                  <td data-label="Ações"><div className="inline-actions"><button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleSupplierDetails(supplier.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button><button className="button-secondary" onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" onClick={() => handleDelete(supplier)} type="button">Excluir</button></div></td>
+                  <td className="mobile-secondary" data-label="Telefone" id={`supplier-${supplier.id}-phone`}>{supplier.phone || '—'}</td>
+                  <td className="mobile-secondary" data-label="Email" id={`supplier-${supplier.id}-email`}>{supplier.email || '—'}</td>
+                  <td className="mobile-secondary" data-label="Criado em" id={`supplier-${supplier.id}-created`}><time dateTime={supplier.created_at}>{formatDateTime(supplier.created_at)}</time></td>
+                  <td data-label="Ações"><div className="inline-actions"><button aria-controls={`supplier-${supplier.id}-phone supplier-${supplier.id}-email supplier-${supplier.id}-created`} aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleSupplierDetails(supplier.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button><button className="button-secondary" disabled={deletingSupplierId === supplier.id} onClick={() => openEditSupplier(supplier)} type="button">Editar</button><button className="button-danger" disabled={deletingSupplierId === supplier.id} onClick={() => handleDelete(supplier)} type="button">{deletingSupplierId === supplier.id ? 'Excluindo...' : 'Excluir'}</button></div></td>
                 </tr>
               )
             })}</tbody>

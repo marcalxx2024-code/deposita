@@ -1,15 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { createStockMovement, getRecentMovements } from '../services/movements.js'
-import { listProducts } from '../services/products.js'
+import { getProduct, listProducts } from '../services/products.js'
 import { formatDateTime } from '../utils/formatters.js'
 
 const pageSize = 20
 
 function MovementsPage() {
+  const [searchParams] = useSearchParams()
+  const requestedProductId = Number(searchParams.get('product'))
+  const requestedMovementType = searchParams.get('type')
   const [movements, setMovements] = useState([])
   const [products, setProducts] = useState([])
   const [skip, setSkip] = useState(0)
-  const [form, setForm] = useState({ productId: '', movementType: 'entry', quantity: '', note: '' })
+  const [form, setForm] = useState(() => ({
+    productId: Number.isInteger(requestedProductId) && requestedProductId > 0 ? String(requestedProductId) : '',
+    movementType: requestedMovementType === 'exit' ? 'exit' : 'entry',
+    quantity: '',
+    note: '',
+  }))
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -30,12 +39,21 @@ function MovementsPage() {
 
   const loadProducts = useCallback(async () => {
     try {
-      const data = await listProducts({ page: 1, pageSize: 100 })
-      setProducts(data.items)
+      const data = await listProducts({ page: 1, pageSize: 100, include_inactive: true })
+      const availableProducts = [...data.items]
+      if (Number.isInteger(requestedProductId) && requestedProductId > 0 && !availableProducts.some((product) => product.id === requestedProductId)) {
+        try {
+          availableProducts.push(await getProduct(requestedProductId))
+        } catch (requestError) {
+          if (requestError.status !== 404) throw requestError
+          setForm((current) => current.productId === String(requestedProductId) ? { ...current, productId: '' } : current)
+        }
+      }
+      setProducts(availableProducts)
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível carregar os produtos.')
     }
-  }, [])
+  }, [requestedProductId])
 
   useEffect(() => {
     loadMovements()
@@ -44,6 +62,19 @@ function MovementsPage() {
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      ...(Number.isInteger(requestedProductId) && requestedProductId > 0 && { productId: String(requestedProductId) }),
+      ...(requestedMovementType === 'entry' || requestedMovementType === 'exit' ? { movementType: requestedMovementType } : {}),
+    }))
+  }, [requestedMovementType, requestedProductId])
+
+  const productNames = useMemo(
+    () => new Map(products.map((product) => [product.id, product.name])),
+    [products],
+  )
 
   function toggleMovementDetails(movementId) {
     setExpandedMovementIds((current) => {
@@ -66,8 +97,11 @@ function MovementsPage() {
       })
       setMessage(`${form.movementType === 'entry' ? 'Entrada' : 'Saída'} registrada com sucesso.`)
       setForm({ productId: '', movementType: 'entry', quantity: '', note: '' })
-      setSkip(0)
-      await Promise.all([loadMovements(), loadProducts()])
+      if (skip === 0) await Promise.all([loadMovements(), loadProducts()])
+      else {
+        setSkip(0)
+        await loadProducts()
+      }
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível registrar a movimentação.')
     } finally {
@@ -88,7 +122,7 @@ function MovementsPage() {
           <span aria-hidden="true" className="operation-heading__sign">{form.movementType === 'entry' ? '+' : '−'}</span>
           <div><span className="section-kicker">Painel de operação</span><h2>Registrar movimentação</h2></div>
         </div>
-        <label>Produto<select disabled={saving || products.length === 0} onChange={(event) => setForm((current) => ({ ...current, productId: event.target.value }))} required value={form.productId}><option value="">Selecione um produto</option>{products.map((product) => <option key={product.id} value={product.id}>{product.sku} — {product.name} ({product.quantity})</option>)}</select></label>
+        <label>Produto<select disabled={saving || products.length === 0} onChange={(event) => setForm((current) => ({ ...current, productId: event.target.value }))} required value={form.productId}><option value="">Selecione um produto</option>{products.filter((product) => product.is_active).map((product) => <option key={product.id} value={product.id}>{product.sku} — {product.name} ({product.quantity})</option>)}</select></label>
         <label>Tipo<select disabled={saving} onChange={(event) => setForm((current) => ({ ...current, movementType: event.target.value }))} value={form.movementType}><option value="entry">Entrada</option><option value="exit">Saída</option></select></label>
         <label>Quantidade<input disabled={saving} min="1" onChange={(event) => setForm((current) => ({ ...current, quantity: event.target.value }))} required type="number" value={form.quantity} /></label>
         <label>Observação (opcional)<textarea disabled={saving} maxLength="255" onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} value={form.note} /></label>
@@ -107,10 +141,10 @@ function MovementsPage() {
               return (
                 <tr className={`movement-row ${isEntry ? 'is-entry' : 'is-exit'} ${detailsExpanded ? 'is-expanded' : ''}`} key={movement.id}>
                   <td data-label="Tipo"><span className={`movement-badge ${isEntry ? 'movement-badge--entry' : 'movement-badge--exit'}`}><span aria-hidden="true">{isEntry ? '+' : '−'}</span>{isEntry ? 'Entrada' : 'Saída'}</span></td>
-                  <td data-label="Quantidade"><strong className="quantity-value">{isEntry ? '+' : '−'}{movement.quantity}</strong></td>
-                  <td data-label="Produto"><span className="sku-code">#{movement.product_id}</span></td>
+                  <td data-label="Quantidade"><strong className={`quantity-value movement-quantity movement-quantity--${isEntry ? 'entry' : 'exit'}`}>{isEntry ? '+' : '−'}{movement.quantity}</strong></td>
+                  <td data-label="Produto"><span>{productNames.get(movement.product_id) || `Produto indisponível (ref. ${movement.product_id})`}</span></td>
                   <td data-label="Data"><time dateTime={movement.created_at}>{formatDateTime(movement.created_at)}</time></td>
-                  <td className="mobile-details-cell" data-label="Observação"><span className="mobile-secondary-content">{movement.note || '—'}</span>{movement.note && <button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleMovementDetails(movement.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>}</td>
+                  <td className="mobile-details-cell" data-label="Observação"><span className="mobile-secondary-content" id={`movement-${movement.id}-note`}>{movement.note || '—'}</span>{movement.note && <button aria-controls={`movement-${movement.id}-note`} aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleMovementDetails(movement.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button>}</td>
                 </tr>
               )
             })}</tbody>

@@ -22,6 +22,7 @@ function AppLayout() {
 
   return (
     <div className="app-layout">
+      <a className="skip-link" href="#main-content">Pular para o conteúdo</a>
       <header className="app-layout__header">
         <div className="brand-lockup">
           <span aria-hidden="true" className="brand-mark"><span /></span>
@@ -73,7 +74,7 @@ function AppLayout() {
           </button>
         </div>
       </header>
-      <main className="app-layout__content">
+      <main className="app-layout__content" id="main-content" tabIndex="-1">
         <Outlet />
       </main>
     </div>

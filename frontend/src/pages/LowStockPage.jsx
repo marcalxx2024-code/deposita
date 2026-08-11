@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getLowStockProducts } from '../services/products.js'
+import { listSuppliers } from '../services/suppliers.js'
 
 const pageSize = 20
 
 function LowStockPage() {
   const [products, setProducts] = useState([])
+  const [suppliers, setSuppliers] = useState([])
   const [skip, setSkip] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -27,6 +29,25 @@ function LowStockPage() {
     loadProducts()
   }, [loadProducts])
 
+  useEffect(() => {
+    let active = true
+    listSuppliers({ skip: 0, limit: 100 })
+      .then((data) => {
+        if (active) setSuppliers(data)
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message || 'Não foi possível carregar os fornecedores.')
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const supplierNames = useMemo(
+    () => new Map(suppliers.map((supplier) => [supplier.id, supplier.name])),
+    [suppliers],
+  )
+
   function toggleProductDetails(productId) {
     setExpandedProductIds((current) => {
       const next = new Set(current)
@@ -40,7 +61,7 @@ function LowStockPage() {
     <div className="page low-stock-page">
       <div className="page-header alert-page-header">
         <div><span className="eyebrow">Painel de alerta</span><h1>Estoque baixo</h1><p>Itens abaixo do nível mínimo exigem reposição.</p></div>
-        <Link className="button-link button-positive" to="/movements">Registrar entrada</Link>
+        <Link className="button-link button-positive" to="/movements?type=entry">Registrar entrada</Link>
       </div>
       {error && <p className="error-message" role="alert">{error}</p>}
       {loading ? <p aria-live="polite" className="state-message state-message--loading">Carregando alertas...</p> : products.length === 0 ? <p className="state-message state-message--empty state-message--healthy">Nenhum produto com estoque baixo.</p> : (
@@ -59,8 +80,8 @@ function LowStockPage() {
                   <td data-label="Atual"><span className="quantity-value is-low">{product.quantity}</span></td>
                   <td data-label="Mínimo">{product.minimum_quantity}</td>
                   <td data-label="Falta"><strong className="missing-value">{missing}</strong></td>
-                  <td className="mobile-details-cell" data-label="Fornecedor"><span className="mobile-secondary-content">{product.supplier_id ?? '—'}</span><button aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button></td>
-                  <td data-label="Ação"><Link className="table-action-link" to="/movements">Registrar entrada</Link></td>
+                  <td className="mobile-details-cell" data-label="Fornecedor"><span className="mobile-secondary-content" id={`low-stock-${product.id}-supplier`}>{product.supplier_id === null ? 'Sem fornecedor' : supplierNames.get(product.supplier_id) || 'Fornecedor indisponível'}</span><button aria-controls={`low-stock-${product.id}-supplier`} aria-expanded={detailsExpanded} className="mobile-details-toggle button-secondary" onClick={() => toggleProductDetails(product.id)} type="button">{detailsExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}</button></td>
+                  <td data-label="Ação"><Link className="table-action-link" to={`/movements?product=${product.id}&type=entry`}>Registrar entrada</Link></td>
                 </tr>
               )
             })}</tbody>
